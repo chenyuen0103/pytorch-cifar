@@ -5,6 +5,7 @@ import shutil
 import time
 import warnings
 from enum import Enum
+import csv
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -21,7 +22,7 @@ import torchvision.transforms as transforms
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import Subset
 import socket
-from dataset_loader import CustomImageNetDataset
+from dataset_loader import CustomImageNetDataset, get_dataloader
 
 
 
@@ -30,13 +31,16 @@ model_names = sorted(name for name in models.__dict__
     and callable(models.__dict__[name]))
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
-parser.add_argument('data', metavar='DIR', nargs='?', default='/projects/bdeb/chenyuen0103/imagenet1k',
+parser.add_argument('--dataset', metavar='DIR', nargs='?', default='/projects/bdeb/chenyuen0103/imagenet1k',
                     help='path to dataset (default: imagenet)')
 parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet18',
                     choices=model_names,
                     help='model architecture: ' +
                         ' | '.join(model_names) +
                         ' (default: resnet18)')
+parser.add_argument('--algorithm', default='sgd', type=str,
+                    choices=['sgd', 'divebatch', 'adam'],
+                    help='Training algorithm to use')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 parser.add_argument('--epochs', default=90, type=int, metavar='N',
@@ -81,6 +85,10 @@ parser.add_argument('--multiprocessing-distributed', action='store_true',
                          'fastest way to use PyTorch for either single node or '
                          'multi node data parallel training')
 parser.add_argument('--dummy', action='store_true', help="use fake data to benchmark")
+parser.add_argument('--log_dir', default='../logs', type=str,
+                    help='Directory to save logs')
+parser.add_argument('--checkpoint_dir', default='/projects/bdeb/chenyuen0103/checkpoint', type=str,
+                    help='Directory to save checkpoints')
 
 best_acc1 = 0
 
@@ -209,19 +217,29 @@ def main_worker(gpu, ngpus_per_node, args):
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
     
+    # Scale learning rate
+    effective_bs = args.batch_size * args.world_size
+    scale_factor = effective_bs / args.batch_size
+    scaled_lr = args.lr * scale_factor
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = scaled_lr
+
+    
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
     scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
-    
+    checkpoint_dir = os.path.join(args.checkpoint_dir, args.arch, args.dataset)
+    checkpoint_file = f"{args.algorithm}_lr{args.lr}_bs{args.batch_size}_ckpt.pth"
+    checkpoint_path = os.path.join(checkpoint_dir, checkpoint_file)
     # optionally resume from a checkpoint
     if args.resume:
-        if os.path.isfile(args.resume):
-            print("=> loading checkpoint '{}'".format(args.resume))
+        if os.path.isfile(checkpoint_path):
+            print("=> loading checkpoint '{}'".format(checkpoint_path))
             if args.gpu is None:
-                checkpoint = torch.load(args.resume)
+                checkpoint = torch.load(checkpoint_path)
             elif torch.cuda.is_available():
                 # Map model to be loaded to specified single gpu.
                 loc = 'cuda:{}'.format(args.gpu)
-                checkpoint = torch.load(args.resume, map_location=loc)
+                checkpoint = torch.load(checkpoint_path, map_location=loc)
             args.start_epoch = checkpoint['epoch']
             best_acc1 = checkpoint['best_acc1']
             if args.gpu is not None:
@@ -233,7 +251,30 @@ def main_worker(gpu, ngpus_per_node, args):
             print("=> loaded checkpoint '{}' (epoch {})"
                   .format(args.resume, checkpoint['epoch']))
         else:
-            print("=> no checkpoint found at '{}'".format(args.resume))
+            print("=> no checkpoint found at '{}'".format(checkpoint_path))
+
+
+    # Create checkpoint directory
+    if args.rank == 0:
+        os.makedirs(args.checkpoint_dir, exist_ok=True)
+
+    # Create log directory and file
+    log_dir = os.path.join(args.log_dir, args.arch, args.dataset)
+    if args.rank == 0:
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, f'{args.algorithm}_lr{scaled_lr}_bs{effective_bs}.csv')
+        log_exists = os.path.exists(log_file)
+        with open(log_file, 'a', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                'epoch', 'train_loss', 'train_acc1', 'train_acc5',
+                'val_loss', 'val_acc1', 'val_acc5',
+                'best_acc1', 'learning_rate', 'batch_size',
+                'epoch_time', 'eval_time',
+                'memory_allocated_mb', 'memory_reserved_mb'
+            ])
+            if not log_exists or args.start_epoch == 0:
+                writer.writeheader()
+
 
 
     # Data loading code
@@ -252,8 +293,8 @@ def main_worker(gpu, ngpus_per_node, args):
         val_dataset = get_imagenet1k_dataset(args, is_train=False)
         num_classes = 1000
     else:
-        traindir = os.path.join(args.data, 'train')
-        valdir = os.path.join(args.data, 'val')
+        traindir = os.path.join(args.dataset, 'train')
+        valdir = os.path.join(args.dataset, 'val')
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
 
@@ -297,20 +338,23 @@ def main_worker(gpu, ngpus_per_node, args):
         return
 
     for epoch in range(args.start_epoch, args.epochs):
+        epoch_start_time = time.time()
         if args.distributed:
             train_sampler.set_epoch(epoch)
 
         # train for one epoch
-        train(train_loader, model, criterion, optimizer, epoch, device, args)
+        train_loss, train_acc1, train_acc5 = train(train_loader, model, criterion, optimizer, epoch, device, args)
 
+        val_start_time = time.time()
         # evaluate on validation set
-        acc1 = validate(val_loader, model, criterion, args)
+        val_loss, val_acc1, val_acc5 = validate(val_loader, model, criterion, args)
+        eval_time = time.time() - val_start_time
         
-        scheduler.step()
+        
         
         # remember best acc@1 and save checkpoint
-        is_best = acc1 > best_acc1
-        best_acc1 = max(acc1, best_acc1)
+        is_best = val_acc1 > best_acc1
+        best_acc1 = max(val_acc1, best_acc1)
 
         if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0):
@@ -322,6 +366,42 @@ def main_worker(gpu, ngpus_per_node, args):
                 'optimizer' : optimizer.state_dict(),
                 'scheduler' : scheduler.state_dict()
             }, is_best)
+            checkpoint_filename = f'checkpoint_epoch_{epoch+1}.pth.tar'
+            checkpoint_path = os.path.join(args.checkpoint_dir, checkpoint_filename)
+            save_checkpoint(checkpoint, is_best, filename=checkpoint_path)
+
+        epoch_time = time.time() - epoch_start_time
+                # **Insert Your Logging Code Here**
+        if args.rank == 0:
+            memory_allocated = torch.cuda.memory_allocated(device) / (1024 * 1024) if torch.cuda.is_available() else 0
+            memory_reserved = torch.cuda.memory_reserved(device) / (1024 * 1024) if torch.cuda.is_available() else 0
+            with open(log_file, 'a', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=[
+                    'epoch', 'train_loss', 'train_acc1', 'train_acc5',
+                    'val_loss', 'val_acc1', 'val_acc5',
+                    'best_acc1', 'learning_rate', 'batch_size',
+                    'epoch_time', 'eval_time',
+                    'memory_allocated_mb', 'memory_reserved_mb'
+                ])
+                writer.writerow({
+                    'epoch': epoch + 1,
+                    'train_loss': train_loss,
+                    'train_acc1': train_acc1,
+                    'train_acc5': train_acc5,
+                    'val_loss': val_loss,
+                    'val_acc1': val_acc1,
+                    'val_acc5': val_acc5,
+                    'best_acc1': best_acc1,
+                    'learning_rate': scheduler.get_last_lr()[0],
+                    'batch_size': args.batch_size,
+                    'epoch_time': round(epoch_time, 2),
+                    'eval_time': round(eval_time, 2),
+                    'memory_allocated_mb': round(memory_allocated, 2),
+                    'memory_reserved_mb': round(memory_reserved, 2),
+                })
+            scheduler.step()
+
+
 
 
 def train(train_loader, model, criterion, optimizer, epoch, device, args):
@@ -368,6 +448,8 @@ def train(train_loader, model, criterion, optimizer, epoch, device, args):
 
         if i % args.print_freq == 0:
             progress.display(i + 1)
+    
+    return losses.avg, top1.avg, top5.avg
 
 
 def validate(val_loader, model, criterion, args):
@@ -429,7 +511,7 @@ def validate(val_loader, model, criterion, args):
 
     progress.display_summary()
 
-    return top1.avg
+    return losses.avg, top1.avg, top5.avg
 
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
