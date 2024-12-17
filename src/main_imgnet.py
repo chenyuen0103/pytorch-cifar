@@ -184,7 +184,7 @@ def main_worker(gpu, ngpus_per_node, args):
                 # When using a single GPU per process and per
                 # DistributedDataParallel, we need to divide the batch size
                 # ourselves based on the total number of GPUs of the current node.
-                args.batch_size = int(args.batch_size / ngpus_per_node)
+                # args.batch_size = int(args.batch_size / ngpus_per_node)
                 args.workers = int((args.workers + ngpus_per_node - 1) / ngpus_per_node)
                 model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
             else:
@@ -394,14 +394,14 @@ def main_worker(gpu, ngpus_per_node, args):
                 writer.writerow({
                     'epoch': epoch + 1,
                     'train_loss': train_loss,
-                    'train_acc1': train_acc1,
-                    'train_acc5': train_acc5,
+                    'train_acc1': train_acc1.item(),
+                    'train_acc5': train_acc5.item(),
                     'val_loss': val_loss,
                     'val_acc1': val_acc1,
                     'val_acc5': val_acc5,
                     'best_acc1': best_acc1,
                     'learning_rate': scheduler.get_last_lr()[0],
-                    'batch_size': args.batch_size,
+                    'batch_size': effective_bs,
                     'epoch_time': round(epoch_time, 2),
                     'eval_time': round(eval_time, 2),
                     'memory_allocated_mb': round(memory_allocated, 2),
