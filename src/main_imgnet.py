@@ -58,6 +58,8 @@ parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
+parser.add_argument('--accumulation-steps', default=1, type=int,
+                    help='Number of steps to accumulate gradients over before performing an optimization step')
 parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)',
                     dest='weight_decay')
@@ -91,6 +93,7 @@ parser.add_argument('--log_dir', default='../logs', type=str,
                     help='Directory to save logs')
 parser.add_argument('--checkpoint_dir', default='/projects/bdeb/chenyuen0103/checkpoint', type=str,
                     help='Directory to save checkpoints')
+
 
 best_acc1 = 0
 
@@ -220,7 +223,7 @@ def main_worker(gpu, ngpus_per_node, args):
                                 weight_decay=args.weight_decay)
     
     # Scale learning rate
-    effective_bs = args.batch_size * args.world_size
+    effective_bs = args.batch_size * args.accumulation_steps * args.world_size
     scale_factor = effective_bs / args.batch_size
     scaled_lr = args.lr * scale_factor
     for param_group in optimizer.param_groups:
@@ -362,6 +365,9 @@ def main_worker(gpu, ngpus_per_node, args):
 
         if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0):
+
+            checkpoint_filename = f'checkpoint_epoch_{epoch+1}.pth.tar'
+            checkpoint_path = os.path.join(args.checkpoint_dir, checkpoint_filename)
             save_checkpoint({
                 'epoch': epoch + 1,
                 'arch': args.arch,
@@ -369,9 +375,7 @@ def main_worker(gpu, ngpus_per_node, args):
                 'best_acc1': best_acc1,
                 'optimizer' : optimizer.state_dict(),
                 'scheduler' : scheduler.state_dict()
-            }, is_best)
-            checkpoint_filename = f'checkpoint_epoch_{epoch+1}.pth.tar'
-            checkpoint_path = os.path.join(args.checkpoint_dir, checkpoint_filename)
+            }, is_best, filename=checkpoint_path)
             # save_checkpoint(checkpoint, is_best, filename=checkpoint_path)
 
         epoch_time = time.time() - epoch_start_time
@@ -390,12 +394,12 @@ def main_worker(gpu, ngpus_per_node, args):
                 writer.writerow({
                     'epoch': epoch + 1,
                     'train_loss': train_loss,
-                    'train_acc1': train_acc1.item(),
-                    'train_acc5': train_acc5.item(),
-                    'val_loss': val_loss.item(),
-                    'val_acc1': val_acc1.item(),
-                    'val_acc5': val_acc5.item(),
-                    'best_acc1': best_acc1.item(),
+                    'train_acc1': train_acc1,
+                    'train_acc5': train_acc5,
+                    'val_loss': val_loss,
+                    'val_acc1': val_acc1,
+                    'val_acc5': val_acc5,
+                    'best_acc1': best_acc1,
                     'learning_rate': scheduler.get_last_lr()[0],
                     'batch_size': args.batch_size,
                     'epoch_time': round(epoch_time, 2),
@@ -441,17 +445,26 @@ def train(train_loader, model, criterion, optimizer, epoch, device, args):
         top1.update(acc1[0], images.size(0))
         top5.update(acc5[0], images.size(0))
 
-        # compute gradient and do SGD step
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
 
+        loss.backward()
+        if (i + 1) % args.accumulation_steps == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+
+        
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
-
         if i % args.print_freq == 0:
             progress.display(i + 1)
+
+    # Handle remaining gradients
+    if len(train_loader) % args.accumulation_steps != 0:
+        optimizer.step()
+        optimizer.zero_grad()
+
+
+
     
     return losses.avg, top1.avg, top5.avg
 
