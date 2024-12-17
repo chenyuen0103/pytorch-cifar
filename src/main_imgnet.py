@@ -31,7 +31,7 @@ model_names = sorted(name for name in models.__dict__
     and callable(models.__dict__[name]))
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
-parser.add_argument('--dataset', metavar='DIR', nargs='?', default='/projects/bdeb/chenyuen0103/imagenet1k',
+parser.add_argument('--dataset', metavar='DIR', nargs='?', default='/projects/bdeb/chenyuen0103/tinyimagenet',
                     help='path to dataset (default: imagenet)')
 parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet18',
                     choices=model_names,
@@ -284,13 +284,13 @@ def main_worker(gpu, ngpus_per_node, args):
         train_dataset = datasets.FakeData(1281167, (3, 224, 224), 1000, transforms.ToTensor())
         val_dataset = datasets.FakeData(50000, (3, 224, 224), 1000, transforms.ToTensor())
     else:
-    # Check if you're using ImageNet1K
+    # Check if you're using imagenet
     # You can add an argument to specify the dataset if needed
-        dataset_name = 'imagenet1k'  # Set this based on your requirement
+        dataset_name = 'imagenet'  # Set this based on your requirement
 
-    if dataset_name == 'imagenet1k':
-        train_dataset = get_imagenet1k_dataset(args, is_train=True)
-        val_dataset = get_imagenet1k_dataset(args, is_train=False)
+    if dataset_name == 'imagenet':
+        train_dataset = get_imagenet_dataset(args, is_train=True)
+        val_dataset = get_imagenet_dataset(args, is_train=False)
         num_classes = 1000
     else:
         traindir = os.path.join(args.dataset, 'train')
@@ -618,9 +618,9 @@ def accuracy(output, target, topk=(1,)):
 from datasets import load_from_disk
 
 # Add this function above or below your existing functions
-def get_imagenet1k_dataset(args, is_train=True):
+def get_imagenet_dataset(args, is_train=True):
     """
-    Loads the ImageNet1K dataset using Hugging Face's load_from_disk and wraps it with a custom PyTorch Dataset.
+    Loads the imagenet dataset using Hugging Face's load_from_disk and wraps it with a custom PyTorch Dataset.
     
     Args:
         args (argparse.Namespace): Parsed command-line arguments.
@@ -629,7 +629,7 @@ def get_imagenet1k_dataset(args, is_train=True):
     Returns:
         dataset (CustomImageNetDataset): Wrapped PyTorch Dataset.
     """
-    # Define ImageNet1K transformations
+    # Define imagenet transformations
     if is_train:
         transform = transforms.Compose([
             transforms.RandomResizedCrop(224),
@@ -647,14 +647,14 @@ def get_imagenet1k_dataset(args, is_train=True):
                                  (0.229, 0.224, 0.225)),
         ])
 
-    # Define the path for ImageNet1K
-    imagenet1k_path = '/projects/bdeb/chenyuen0103/imagenet1k'  # Update if different
+    # Define the path for imagenet
+    imagenet_path = '/projects/bdeb/chenyuen0103/tinyimagenet'  # Update if different
 
-    # Load ImageNet1K dataset from Hugging Face's `load_from_disk`
-    hf_dataset = load_from_disk(imagenet1k_path)
+    # Load imagenet dataset from Hugging Face's `load_from_disk`
+    hf_dataset = load_from_disk(imagenet_path)
 
     # Select appropriate split
-    split = "train" if is_train else "validation"
+    split = "train" if is_train else "valid"
     dataset_split = hf_dataset[split]
 
     # Wrap the Hugging Face dataset with PyTorch Dataset
