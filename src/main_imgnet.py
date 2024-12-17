@@ -43,7 +43,7 @@ parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet18',
 parser.add_argument('--algorithm', default='sgd', type=str,
                     choices=['sgd', 'divebatch', 'adam'],
                     help='Training algorithm to use')
-parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
+parser.add_argument('-j', '--workers', default=1, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 parser.add_argument('--epochs', default=90, type=int, metavar='N',
                     help='number of total epochs to run')
@@ -54,7 +54,7 @@ parser.add_argument('-b', '--batch-size', default=256, type=int,
                     help='mini-batch size (default: 256), this is the total '
                          'batch size of all GPUs on the current node when '
                          'using Data Parallel or Distributed Data Parallel')
-parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
+parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
@@ -71,7 +71,7 @@ parser.add_argument('--pretrained', dest='pretrained', action='store_true',
                     help='use pre-trained model')
 parser.add_argument('--world-size', default=-1, type=int,
                     help='number of nodes for distributed training')
-parser.add_argument('--rank', default=-1, type=int,
+parser.add_argument('--rank', default=0, type=int,
                     help='node rank for distributed training')
 # parser.add_argument('--dist-url', default='tcp://224.66.41.62:23456', type=str,
 #                     help='url used to set up distributed training')
@@ -229,7 +229,7 @@ def main_worker(gpu, ngpus_per_node, args):
     
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
     scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
-    checkpoint_dir = os.path.join(args.checkpoint_dir, args.arch, args.dataset)
+    checkpoint_dir = os.path.join(args.checkpoint_dir, args.arch, 'imagenet')
     checkpoint_file = f"{args.algorithm}_lr{args.lr}_bs{args.batch_size}_ckpt.pth"
     checkpoint_path = os.path.join(checkpoint_dir, checkpoint_file)
     # optionally resume from a checkpoint
@@ -261,7 +261,9 @@ def main_worker(gpu, ngpus_per_node, args):
         os.makedirs(args.checkpoint_dir, exist_ok=True)
 
     # Create log directory and file
-    log_dir = os.path.join(args.log_dir, args.arch, args.dataset)
+
+    log_dir = os.path.join(args.log_dir, args.arch, 'imagenet')
+
     if args.rank == 0:
         os.makedirs(log_dir, exist_ok=True)
         log_file = os.path.join(log_dir, f'{args.algorithm}_lr{scaled_lr}_bs{effective_bs}.csv')
@@ -370,7 +372,7 @@ def main_worker(gpu, ngpus_per_node, args):
             }, is_best)
             checkpoint_filename = f'checkpoint_epoch_{epoch+1}.pth.tar'
             checkpoint_path = os.path.join(args.checkpoint_dir, checkpoint_filename)
-            save_checkpoint(checkpoint, is_best, filename=checkpoint_path)
+            # save_checkpoint(checkpoint, is_best, filename=checkpoint_path)
 
         epoch_time = time.time() - epoch_start_time
                 # **Insert Your Logging Code Here**
@@ -388,12 +390,12 @@ def main_worker(gpu, ngpus_per_node, args):
                 writer.writerow({
                     'epoch': epoch + 1,
                     'train_loss': train_loss,
-                    'train_acc1': train_acc1,
-                    'train_acc5': train_acc5,
-                    'val_loss': val_loss,
-                    'val_acc1': val_acc1,
-                    'val_acc5': val_acc5,
-                    'best_acc1': best_acc1,
+                    'train_acc1': train_acc1.item(),
+                    'train_acc5': train_acc5.item(),
+                    'val_loss': val_loss.item(),
+                    'val_acc1': val_acc1.item(),
+                    'val_acc5': val_acc5.item(),
+                    'best_acc1': best_acc1.item(),
                     'learning_rate': scheduler.get_last_lr()[0],
                     'batch_size': args.batch_size,
                     'epoch_time': round(epoch_time, 2),
