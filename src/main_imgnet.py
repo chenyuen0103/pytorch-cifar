@@ -1,3 +1,5 @@
+#python main_imgnet.py -a resnet50 --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0
+# '../../../scratch/bcxt/yian3/imagenet-1k'
 import argparse
 import os
 import random
