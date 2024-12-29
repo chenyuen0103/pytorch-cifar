@@ -25,6 +25,11 @@ from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import Subset
 import socket
 from dataset_loader import CustomImageNetDataset, get_dataloader
+from train_utils import log_metrics, test, DiveBatchTrainer, SGDTrainer
+import time
+import csv
+from backpack import extend
+from utils import progress_bar
 
 
 
@@ -56,6 +61,7 @@ parser.add_argument('-b', '--batch-size', default=256, type=int,
                          'using Data Parallel or Distributed Data Parallel')
 parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
+parser.add_argument('--adaptive_lr',  action='store_true', help='Rescale learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
 parser.add_argument('--accumulation-steps', default=1, type=int,
@@ -255,6 +261,7 @@ def main_worker(gpu, ngpus_per_node, args):
             scheduler.load_state_dict(checkpoint['scheduler'])
             print("=> loaded checkpoint '{}' (epoch {})"
                   .format(args.resume, checkpoint['epoch']))
+            batch_size = checkpoint['batch_size']
         else:
             print("=> no checkpoint found at '{}'".format(checkpoint_path))
 
@@ -269,7 +276,15 @@ def main_worker(gpu, ngpus_per_node, args):
 
     if args.rank == 0:
         os.makedirs(log_dir, exist_ok=True)
-        log_file = os.path.join(log_dir, f'{args.algorithm}_lr{scaled_lr}_bs{effective_bs}.csv')
+        if args.algorithm == 'sgd':
+            log_file = os.path.join(log_dir, f'{args.algorithm}_lr{scaled_lr}_bs{effective_bs}.csv')
+        elif args.algorithm == 'divebatch':
+            log_file = os.path.join(log_dir, f'{args.algorithm}_lr{args.lr}_bs{args.batch_size}_rf{args.resize_freq}_mbs{args.max_batch_size}_delta{args.delta}_s{args.seed}.csv')
+        elif args.algorithm == 'adabatch':
+            log_file = os.path.join(log_dir, f'{args.algorithm}_lr{args.lr}_bs{args.batch_size}_rf{args.resize_freq}_mbs{args.max_batch_size}_s{args.seed}.csv')
+
+        if args.adaptive_lr:
+            log_file = log_file.replace('.csv', '_rescale.csv')
         log_exists = os.path.exists(log_file)
         with open(log_file, 'a', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=[
@@ -277,14 +292,12 @@ def main_worker(gpu, ngpus_per_node, args):
                 'val_loss', 'val_acc1', 'val_acc5',
                 'best_acc1', 'learning_rate', 'batch_size',
                 'epoch_time', 'eval_time',
-                'memory_allocated_mb', 'memory_reserved_mb'
+                'memory_allocated_mb', 'memory_reserved_mb', 'grad_diversity'
             ])
             if not log_exists or args.start_epoch == 0:
                 writer.writeheader()
 
 
-
-    # Data loading code
     # Data loading code
     if args.dummy:
         print("=> Dummy data is used!")
@@ -344,14 +357,55 @@ def main_worker(gpu, ngpus_per_node, args):
         validate(val_loader, model, criterion, args)
         return
 
+    # Instantiate the appropriate Trainer
+    if args.algorithm == 'sgd':
+        trainer = SGDTrainer(model, optimizer, criterion, device)
+    elif args.algorithm == 'divebatch':
+        trainer = DiveBatchTrainer(
+            model, optimizer, criterion, device,
+            resize_freq=args.resize_freq,
+            max_batch_size=args.max_batch_size,
+            delta=args.delta,
+            dataset_size=len(train_loader.dataset)
+        )
+
+    old_grad_diversity = 1.0 if args.algorithm == 'divebatch' else None 
+
     for epoch in range(args.start_epoch, args.epochs):
         epoch_start_time = time.time()
         if args.distributed:
             train_sampler.set_epoch(epoch)
 
         # train for one epoch
-        train_loss, train_acc1, train_acc5 = train(train_loader, model, criterion, optimizer, epoch, device, args)
+        train_metrics = trainer.train_epoch(train_loader, epoch)
 
+        if args.algorithm == 'divebatch':
+            new_batch_size = trainer.suggest_new_batch_size(
+                current_batch_size=args.batch_size,
+                grad_diversity=train_metrics.get("grad_diversity", 1.0),
+                args=args
+            )
+
+            # Broadcast the new batch size from rank 0 to all other ranks
+            new_batch_size_tensor = torch.tensor(new_batch_size, dtype=torch.int)
+            if args.distributed:
+                # Only rank 0 computes the new batch size
+                if args.rank != 0:
+                    new_batch_size_tensor = torch.tensor(0, dtype=torch.int)
+                dist.broadcast(new_batch_size_tensor, src=0)
+                if args.rank != 0:
+                    new_batch_size = new_batch_size_tensor.item()
+            
+            # Ensure all ranks have the updated batch size
+            if new_batch_size != args.batch_size:
+                print(f"Rank {args.rank}: Updating batch size from {args.batch_size} to {new_batch_size}")
+                args.batch_size = new_batch_size
+
+                # Recreate the DataLoader with the new batch size
+                train_loader = torch.utils.data.DataLoader(
+                    train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
+                    num_workers=args.workers, pin_memory=True, sampler=train_sampler
+                )
         val_start_time = time.time()
         # evaluate on validation set
         val_loss, val_acc1, val_acc5 = validate(val_loader, model, criterion, args)
@@ -393,9 +447,9 @@ def main_worker(gpu, ngpus_per_node, args):
                 ])
                 writer.writerow({
                     'epoch': epoch + 1,
-                    'train_loss': train_loss,
-                    'train_acc1': train_acc1.item(),
-                    'train_acc5': train_acc5.item(),
+                    'train_loss': train_metrics["train_loss"],
+                    'train_acc1': train_metrics["train_accuracy"],
+                    'train_acc5': None
                     'val_loss': val_loss,
                     'val_acc1': val_acc1,
                     'val_acc5': val_acc5,
@@ -406,8 +460,40 @@ def main_worker(gpu, ngpus_per_node, args):
                     'eval_time': round(eval_time, 2),
                     'memory_allocated_mb': round(memory_allocated, 2),
                     'memory_reserved_mb': round(memory_reserved, 2),
+                    'grad_diversity': train_metrics.get("grad_diversity")
                 })
             scheduler.step()
+        if (epoch + 1) % args.resize_freq == 0:
+            old_batch_size = batch_size
+            if args.algorithm == 'divebatch':
+                grad_diversity = train_metrics.get("grad_diversity")
+                rescale_ratio = max((grad_diversity / old_grad_diversity),1)
+            elif args.algorithm == 'adabatch':
+                rescale_ratio = 2
+
+            batch_size = int(min(old_batch_size * rescale_ratio, args.max_batch_size))
+            
+            if batch_size != old_batch_size:
+                # Update the batch size argument
+                # batch_size = new_batch_size
+                # print(f"Updating DataLoader with new batch size: {batch_size}")
+                # trainer.accum_steps = new_batch_size // args.batch_size
+                # Recreate DataLoader with the new batch size
+                print(f"Recreating trainloader with batch size: {batch_size}...")
+                trainloader = torch.utils.data.DataLoader(
+                    trainset, 
+                    batch_size=batch_size,
+                    shuffle=True, 
+                    num_workers=1, 
+                    pin_memory=True
+                )
+
+            if args.adaptive_lr:
+                # rescale the learning rate
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] *= rescale_ratio
+
+        
 
 
 

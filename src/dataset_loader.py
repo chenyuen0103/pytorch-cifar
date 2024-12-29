@@ -4,6 +4,16 @@ import torchvision.datasets as datasets
 from torch.utils.data import DataLoader
 from datasets import load_from_disk
 from PIL import Image
+import os
+import psutil
+
+
+def get_num_workers():
+    total_cores = psutil.cpu_count(logical=False)
+    num_gpus = len(os.environ["CUDA_VISIBLE_DEVICES"].split(","))
+    workers_per_gpu = max(1, total_cores // num_gpus)
+    return workers_per_gpu
+
 
 class CustomImageNetDataset(torch.utils.data.Dataset):
     def __init__(self, dataset, transform):
@@ -25,7 +35,7 @@ class CustomImageNetDataset(torch.utils.data.Dataset):
     
 
 
-def get_dataloader(dataset_name, batch_size, num_workers=2, is_train=True, return_dataset=False, sampler=None):
+def get_dataloader(dataset_name, batch_size, num_workers=None, is_train=True, return_dataset=False, sampler=None):
     """
     Load dataset and create DataLoader.
 
@@ -39,6 +49,12 @@ def get_dataloader(dataset_name, batch_size, num_workers=2, is_train=True, retur
         dataloader (torch.utils.data.DataLoader): DataLoader for the dataset.
         num_classes (int): Number of classes in the dataset.
     """
+
+    if num_workers is None:
+        allocated_cores = len(psutil.Process().cpu_affinity())  # Cores assigned to this process
+        num_workers = max(1, allocated_cores - 1)  # Reserve 1 core for the main process
+        print(f"Using {num_workers} DataLoader workers (allocated cores: {allocated_cores}).")
+
     if dataset_name in ['cifar10', 'cifar100']:
         # Define different transformations for train and test
         if is_train:
