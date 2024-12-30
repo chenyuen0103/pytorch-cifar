@@ -323,6 +323,7 @@ for epoch in range(start_epoch, args.epochs):
     train_metrics = trainer.train_epoch(trainloader, epoch)
     val_loss, val_acc, eval_time = test(epoch)
 
+    
     log_metrics(
         log_file=log_file,
         epoch=epoch + 1,
@@ -330,7 +331,7 @@ for epoch in range(start_epoch, args.epochs):
         train_acc=train_metrics["train_accuracy"],
         val_loss=val_loss,
         val_acc=val_acc,
-        lr=scheduler.get_last_lr()[0],
+        lr=optimizer.param_groups[0]['lr'],
         batch_size=batch_size,
         epoch_time=train_metrics.get("epoch_time", 0),
         eval_time=eval_time,
@@ -347,6 +348,7 @@ for epoch in range(start_epoch, args.epochs):
             rescale_ratio = max((grad_diversity / old_grad_diversity),1)
         elif args.algorithm == 'adabatch':
             rescale_ratio = 2
+            breakpoint()
         batch_size = int(min(old_batch_size * rescale_ratio, args.max_batch_size))
         
         if batch_size != old_batch_size:

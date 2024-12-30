@@ -120,27 +120,30 @@ def load_config(config_path: str):
 
 def generate_commands_from_config(config: dict):
     """
-    Generates a list of commands based on the provided configuration.
+    Generates a list of commands based on the provided configuration, including different seeds.
 
     Args:
         config (dict): Configuration dictionary.
+        seed_range (range): Range of seed values to iterate over.
 
     Returns:
         List[str]: List of shell commands.
     """
     commands = []
+    seed_range = range(1, 6)  # Range of seed values to iterate over
     for script, details in config.items():
-        scripts_cmd = details["scripts"]
-        algorithms = details["algorithms"]
+        scripts_cmd = details.get("scripts", "")
+        algorithms = details.get("algorithms", {})
         for algo, algo_params in algorithms.items():
             lrs = algo_params.get("lr", [0.1])
             batch_sizes = algo_params.get("batch_size", [128])
             flags_list = algo_params.get("flags", [[]])
-            for lr, bs, flags in itertools.product(lrs, batch_sizes, flags_list):
+            for seed, lr, bs, flags in itertools.product(seed_range, lrs, batch_sizes, flags_list):
                 flags_str = ' '.join(flags)
-                cmd = f"{scripts_cmd} --algorithm {algo} --lr {lr} --batch_size {bs} {flags_str}"
-                commands.append(cmd.strip())
+                cmd = f"{scripts_cmd} --algorithm {algo} --lr {lr} --batch_size {bs} --seed {seed} {flags_str}".strip()
+                commands.append(cmd)
     return commands
+
 
 def generate_commands():
     """

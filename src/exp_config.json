@@ -1,6 +1,6 @@
 {
-    "main_cifar10_og.py": {
-        "scripts": "python main_cifar10_og.py",
+    "main_cifar10.py": {
+        "scripts": "python main_cifar10.py",
         "algorithms": {
             "sgd": {
                 "lr": [0.1, 1.6],
@@ -15,20 +15,11 @@
                     ["--resize_freq", "20","--resume"],
                     ["--resize_freq", "20", "--adaptive_lr","--resume"]
                 ]
-            },
-            "divebatch": {
-                "lr": [0.1],
-                "batch_size": [128],
-                "flags": [
-                    ["--resume"],
-                    ["--resize_freq", "20","--resume"],
-                    ["--resize_freq", "20", "--adaptive_lr","--resume"]
-                ]
             }
         }
     },
-    "main_imgnet_single.py": {
-        "scripts": "python main_imgnet_single.py",
+    "main_imgnet.py": {
+        "scripts": "python main_imgnet.py",
         "algorithms": {
             "sgd": {
                 "lr": [0.01, 0.16],
@@ -36,15 +27,6 @@
                 "flags": [["--resume"]]
             },
             "adabatch": {
-                "lr": [0.01],
-                "batch_size": [256],
-                "flags": [
-                    ["--resume"],
-                    ["--resize_freq", "20","--resume"],
-                    ["--resize_freq", "20", "--adaptive_lr","--resume"]
-                ]
-            },
-            "divebatch": {
                 "lr": [0.01],
                 "batch_size": [256],
                 "flags": [
