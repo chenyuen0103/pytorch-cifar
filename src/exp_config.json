@@ -12,7 +12,7 @@
                 "batch_size": [128],
                 "flags": [
                     ["--resume"],
-                    ["adaptive_lr","--resume"],
+                    ["--adaptive_lr","--resume"],
                     ["--resize_freq", "20","--resume"],
                     ["--resize_freq", "20", "--adaptive_lr","--resume"]
                 ]
@@ -32,7 +32,7 @@
                 "batch_size": [256],
                 "flags": [
                     ["--resume"],
-                    ["adaptive_lr","--resume"],
+                    ["--adaptive_lr","--resume"],
                     ["--resize_freq", "20","--resume"],
                     ["--resize_freq", "20", "--adaptive_lr","--resume"]
                 ]
