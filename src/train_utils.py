@@ -219,7 +219,7 @@ def test(model, optimizer, scheduler, testloader, criterion, device, epoch, prog
 
 
 
-def log_metrics(log_file, epoch, train_loss, train_acc, val_loss, val_acc, lr, batch_size, epoch_time, eval_time, memory_allocated, memory_reserved, grad_diversity=None):
+def log_metrics(log_file, epoch, train_loss, train_acc, val_loss, val_acc, lr, batch_size, epoch_time, eval_time, abs_time, memory_allocated, memory_reserved, grad_diversity=None):
     memory_allocated_mb = memory_allocated / (1024 * 1024)
     memory_reserved_mb = memory_reserved / (1024 * 1024)
     
@@ -238,43 +238,12 @@ def log_metrics(log_file, epoch, train_loss, train_acc, val_loss, val_acc, lr, b
             'batch_size': batch_size,
             'epoch_time': epoch_time,  # Time taken for one epoch
             'eval_time': eval_time,  # Time taken for evaluation
+            'abs_time': abs_time,  # Absolute time taken so far
             'memory_allocated_mb': round(memory_allocated_mb, 2),
             'memory_reserved_mb': round(memory_reserved_mb, 2),
             'grad_diversity': round(grad_diversity, 4) if grad_diversity is not None else None,
         })
 
-    def resize_batch(self):
-        """
-        Adjust the current batch size based on the last gradient diversity.
-        """
-        if self.last_grad_diversity is None:
-            print("No gradient diversity data available for resizing.")
-            return self.current_batch_size  # No change
-
-        adjustment_factor = 1.1  # Factor to adjust the batch size
-        diversity_threshold_low = 0.5  # Below this, increase batch size
-        diversity_threshold_high = 1.0  # Above this, decrease batch size
-
-        new_batch_size = self.current_batch_size
-
-        if self.last_grad_diversity < diversity_threshold_low:
-            # Increase batch size
-            new_batch_size = int(self.current_batch_size * adjustment_factor)
-            new_batch_size = min(new_batch_size, self.max_batch_size)
-            if new_batch_size != self.current_batch_size:
-                print(f"Increasing batch size from {self.current_batch_size} to {new_batch_size} based on low grad diversity ({self.last_grad_diversity:.4f})")
-                self.current_batch_size = new_batch_size
-        elif self.last_grad_diversity > diversity_threshold_high:
-            # Decrease batch size
-            new_batch_size = int(self.current_batch_size / adjustment_factor)
-            new_batch_size = max(new_batch_size, self.min_batch_size)
-            if new_batch_size != self.current_batch_size:
-                print(f"Decreasing batch size from {self.current_batch_size} to {new_batch_size} based on high grad diversity ({self.last_grad_diversity:.4f})")
-                self.current_batch_size = new_batch_size
-        else:
-            print(f"No resizing needed. Current batch size remains at {self.current_batch_size} (grad diversity: {self.last_grad_diversity:.4f})")
-
-        return self.current_batch_size
 
 
 

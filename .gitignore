@@ -1,6 +1,6 @@
 __pycache__/
 checkpoint/
-logs/
+logs/*
 data/
 *.tar
 src/hyperparam_search_logs/

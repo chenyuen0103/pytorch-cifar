@@ -115,7 +115,7 @@ def multi_gpu_launcher(commands: List[str], gpus: List[int]):
                     #     procs_by_gpu[gpu] = None
                     if job_queue:
                         cmd = job_queue.pop(0)
-                        full_cmd = f"CUDA_VISIBLE_DEVICES={gpu} OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 {cmd}"
+                        full_cmd = f"CUDA_VISIBLE_DEVICES={gpu} {cmd}"
                         print(f"Launching on GPU {gpu}: {cmd}")
                         try:
                             procs_by_gpu[gpu] = subprocess.Popen(full_cmd, shell=True)
@@ -167,6 +167,7 @@ def hyperparameter_search(grid: Dict[str, List], log_dir: str = './hyperparam_se
 # Main execution block
 if __name__ == "__main__":
     # Define hyperparameter grid
+    
     lr_batch_pairs = [
         [(4096/128) * 0.1, (4096/128) * 0.01],  # Pair for batch_size 4096
         [(2048/128) * 0.1, (2048/128) * 0.01],  # Pair for batch_size 2048

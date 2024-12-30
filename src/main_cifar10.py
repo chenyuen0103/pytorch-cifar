@@ -35,7 +35,7 @@ parser.add_argument('--resize_freq', default=10, type=int, help='Resize frequenc
 parser.add_argument('--max_batch_size', default=2048, type=int, help='Maximum batch size for DiveBatch')
 parser.add_argument('--delta', default=0.1, type=float, help='Delta for GradDiversity')
 parser.add_argument('--resume', '-r', action='store_true', help='Resume from checkpoint')
-parser.add_argument('--log_dir', default='../logs_multistep', type=str, help='Directory to save logs')
+parser.add_argument('--log_dir', default='../logs', type=str, help='Directory to save logs')
 parser.add_argument('--checkpoint_dir', default='/projects/bdeb/chenyuen0103/checkpoint_multistep', type=str, help='Directory to save checkpoints')
 parser.add_argument('--seed', default=1, type=int, help='Random seed')
 args = parser.parse_args()
@@ -63,7 +63,7 @@ elif args.algorithm == 'adabatch':
 
 fieldnames = [
     'epoch', 'train_loss', 'train_acc', 'val_loss', 'val_acc',
-    'learning_rate', 'batch_size', 'epoch_time', 'eval_time', 'memory_allocated', 'memory_reserved', 'gradient_diversity'
+    'learning_rate', 'batch_size', 'epoch_time', 'eval_time', 'abs_time', 'memory_allocated', 'memory_reserved', 'gradient_diversity'
 ]
 
 
@@ -115,19 +115,34 @@ elif args.algorithm == 'divebatch':
     checkpoint_file = f"{args.algorithm}_lr{args.lr}_bs{args.batch_size}_rf{args.resize_freq}_mbs{args.max_batch_size}_delta{args.delta}_s{args.seed}_ckpt.pth"
 elif args.algorithm == 'adabatch':
     checkpoint_file = f"{args.algorithm}_lr{args.lr}_bs{args.batch_size}_rf{args.resize_freq}_mbs{args.max_batch_size}_s{args.seed}_ckpt.pth"
-# Check if the log file already exists
-log_exists = os.path.exists(log_file)
+
 
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(net.parameters(), lr=args.lr,
                       momentum=0.9, weight_decay=5e-4)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
-
 batch_size = args.batch_size
+
+
+
+
+    
+
+
+latest_checkpoint_path = os.path.join(checkpoint_dir, checkpoint_file)
+best_checkpoint_path = os.path.join(checkpoint_dir, checkpoint_file.replace('.pth', '_best.pth'))
+
+if args.algorithm in ['divebatch', 'adabatch'] and args.adaptive_lr:
+    latest_checkpoint_path = latest_checkpoint_path.replace('.pth', '_rescale.pth')
+    best_checkpoint_path = best_checkpoint_path.replace('.pth', '_rescale.pth')
+    log_file = log_file.replace('.csv', '_rescale.csv')
+
+# Check if the log file already exists
+log_exists = os.path.exists(log_file)
 # Resume from checkpoint
 file_mode = 'w'
 if args.resume:
-    latest_checkpoint_path = os.path.join(checkpoint_dir, checkpoint_file)
+
     if os.path.exists(latest_checkpoint_path):
         checkpoint = torch.load(latest_checkpoint_path)
         net.load_state_dict(checkpoint['net'])
@@ -136,11 +151,14 @@ if args.resume:
         best_acc = checkpoint['best_acc']
         start_epoch = checkpoint['epoch']
         file_mode = 'a'
+        row = None
         # load the batch size from the csv file
         with open(log_file, 'r') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 pass
+        # if log file is not empty
+        if row:
             batch_size = int(row['batch_size'])
             
 # Data
@@ -259,7 +277,6 @@ def test(epoch):
     latest_checkpoint_path = os.path.join(checkpoint_dir, checkpoint_file)
     torch.save(state, latest_checkpoint_path)
     if is_best:
-        best_checkpoint_path = os.path.join(checkpoint_dir, checkpoint_file.replace('.pth', '_best.pth'))
         torch.save(state, best_checkpoint_path)
         print(f"Updated best checkpoint: {best_checkpoint_path}")
 
@@ -300,6 +317,8 @@ if args.algorithm == 'divebatch':
     })
 trainer = trainer_cls(**trainer_args)
 old_grad_diversity = 1.0 if args.algorithm == 'divebatch' else None
+
+abs_start_time = time.time()
 for epoch in range(start_epoch, args.epochs):
     train_metrics = trainer.train_epoch(trainloader, epoch)
     val_loss, val_acc, eval_time = test(epoch)
@@ -315,28 +334,22 @@ for epoch in range(start_epoch, args.epochs):
         batch_size=batch_size,
         epoch_time=train_metrics.get("epoch_time", 0),
         eval_time=eval_time,
+        abs_time = time.time() - abs_start_time,
         memory_allocated=torch.cuda.memory_allocated() if device == 'cuda' else 0,
         memory_reserved=torch.cuda.memory_reserved() if device == 'cuda' else 0,
         grad_diversity=train_metrics.get("grad_diversity")
     )
     scheduler.step()
-    if (epoch + 1) % args.resize_freq == 0:
-
+    if (epoch + 1) % args.resize_freq == 0 and args.algorithm in ['divebatch', 'adabatch'] and batch_size < args.max_batch_size:
         old_batch_size = batch_size
         if args.algorithm == 'divebatch':
             grad_diversity = train_metrics.get("grad_diversity")
             rescale_ratio = max((grad_diversity / old_grad_diversity),1)
         elif args.algorithm == 'adabatch':
             rescale_ratio = 2
-
         batch_size = int(min(old_batch_size * rescale_ratio, args.max_batch_size))
         
         if batch_size != old_batch_size:
-            # Update the batch size argument
-            # batch_size = new_batch_size
-            # print(f"Updating DataLoader with new batch size: {batch_size}")
-            # trainer.accum_steps = new_batch_size // args.batch_size
-            # Recreate DataLoader with the new batch size
             print(f"Recreating trainloader with batch size: {batch_size}...")
             trainloader = torch.utils.data.DataLoader(
                 trainset, 
