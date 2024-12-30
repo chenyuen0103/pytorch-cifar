@@ -1,4 +1,11 @@
 # main.py
+#python main_imgnet.py -a resnet50 --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0
+# '../../../../scratch/bcxt/yian3/imagenet-1k'
+#python main_imgnet.py -a resnet50 --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0
+# '../../../../scratch/bcxt/yian3/tiny_imagenet'
+"""
+python main_imgnet.py -a resnet18 -b 256 --accumulation-steps 4 --lr 0.0001 --dist-backend 'nccl' --multiprocessing-distributed --world-size 1
+"""
 
 import argparse
 import os
