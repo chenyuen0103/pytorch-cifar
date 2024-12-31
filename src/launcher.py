@@ -156,17 +156,15 @@ def generate_commands(args):
     Returns:
         List[str]: List of shell commands.
     """
-    if args.config_path:
-        config_path = args.config_path
-    else:
-        config_path = "exp_config_divebatch.json"  # Path to your configuration file
+
+    config_path = args.config_path
     config = load_config(config_path)
     commands = generate_commands_from_config(config,args)
     return commands
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config_path", type=str, default="exp_config_divebatch.json", help="Path to the configuration file")
+    parser.add_argument("--config_path", type=str, default="exp_config.json", help="Path to the configuration file")
     parser.add_argument("--resume", action='store_true', help="Resume from the last checkpoint")
 
 
