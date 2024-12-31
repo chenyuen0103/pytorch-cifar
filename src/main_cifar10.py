@@ -142,6 +142,7 @@ log_exists = os.path.exists(log_file)
 # Resume from checkpoint
 file_mode = 'w'
 if args.resume:
+    # breakpoint()
 
     if os.path.exists(latest_checkpoint_path):
         checkpoint = torch.load(latest_checkpoint_path)
@@ -153,13 +154,18 @@ if args.resume:
         file_mode = 'a'
         row = None
         # load the batch size from the csv file
+        epochs = []
         with open(log_file, 'r') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                pass
+                epochs.append(int(row['epoch'])) if row else None
         # if log file is not empty
         if row:
-            batch_size = int(row['batch_size'])
+            max_epoch_log = max(epochs)
+            if max_epoch_log >= start_epoch:
+                start_epoch = max_epoch_log + 1
+                
+
             
 # Data
 # breakpoint()
@@ -317,6 +323,7 @@ if args.algorithm == 'divebatch':
     })
 trainer = trainer_cls(**trainer_args)
 old_grad_diversity = 1.0 if args.algorithm == 'divebatch' else None
+
 
 abs_start_time = time.time()
 for epoch in range(start_epoch, args.epochs):

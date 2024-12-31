@@ -1,0 +1,17 @@
+{
+    "main_imgnet.py": {
+        "scripts": "python main_imgnet.py",
+        "algorithms": {
+            "divebatch": {
+                "lr": [0.01],
+                "batch_size": [256],
+                "flags": [
+                    [],
+                    ["--adaptive_lr"],
+                    ["--resize_freq", "20"],
+                    ["--resize_freq", "20", "--adaptive_lr"]
+                ]
+            }
+        }
+    }
+}
