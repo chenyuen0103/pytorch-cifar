@@ -208,7 +208,7 @@ def main():
 
     if args.adaptive_lr and args.algorithm != 'sgd':
         latest_checkpoint_path = latest_checkpoint_path.replace('.pth', '_rescale.pth')
-        best_checkpoint_path = best_checkpoint_path.replace('.pth', '_rescale_best.pth')
+        best_checkpoint_path = best_checkpoint_path.replace('.pth', '_rescale.pth')
         
     if args.resume:
         # breakpoint()
