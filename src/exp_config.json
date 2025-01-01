@@ -5,16 +5,16 @@
             "sgd": {
                 "lr": [0.1, 1.6],
                 "batch_size": [128, 2048],
-                "flags": [["--resume"]]
+                "flags": [[]]
             },
             "adabatch": {
                 "lr": [0.1],
                 "batch_size": [128],
                 "flags": [
-                    ["--resume"],
-                    ["--adaptive_lr","--resume"],
-                    ["--resize_freq", "20","--resume"],
-                    ["--resize_freq", "20", "--adaptive_lr","--resume"]
+                    [],
+                    ["--adaptive_lr"],
+                    ["--resize_freq", "20"],
+                    ["--resize_freq", "20", "--adaptive_lr"]
                 ]
             }
         }
@@ -25,16 +25,16 @@
             "sgd": {
                 "lr": [0.01, 0.16],
                 "batch_size": [256, 2048],
-                "flags": [["--resume"]]
+                "flags": [[]]
             },
             "adabatch": {
                 "lr": [0.01],
                 "batch_size": [256],
                 "flags": [
-                    ["--resume"],
-                    ["--adaptive_lr","--resume"],
-                    ["--resize_freq", "20","--resume"],
-                    ["--resize_freq", "20", "--adaptive_lr","--resume"]
+                    [],
+                    ["--adaptive_lr"],
+                    ["--resize_freq", "20"],
+                    ["--resize_freq", "20", "--adaptive_lr"]
                 ]
             }
         }

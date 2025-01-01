@@ -205,6 +205,11 @@ def main():
         checkpoint_file = f"{args.algorithm}_lr{args.lr}_bs{args.batch_size}_rf{args.resize_freq}_mbs{args.max_batch_size}_s{args.seed}_ckpt.pth"
     latest_checkpoint_path = os.path.join(checkpoint_dir, checkpoint_file)
     best_checkpoint_path = os.path.join(checkpoint_dir, checkpoint_file.replace('.pth', '_best.pth'))
+
+    if args.adaptive_lr and args.algorithm != 'sgd':
+        latest_checkpoint_path = latest_checkpoint_path.replace('.pth', '_rescale.pth')
+        best_checkpoint_path = best_checkpoint_path.replace('.pth', '_rescale_best.pth')
+        
     if args.resume:
         # breakpoint()
         if os.path.exists(latest_checkpoint_path):
@@ -220,6 +225,22 @@ def main():
             print(f"=> loaded checkpoint (epoch {checkpoint['epoch']})")
         else:
             print(f"=> no checkpoint found at '{latest_checkpoint_path}'")
+
+        row = None
+        # load the batch size from the csv file
+        epochs = []
+        with open(log_file, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                epochs.append(int(row['epoch'])) if row else None
+        # if log file is not empty
+        if row:
+            max_epoch_log = max(epochs)
+            
+            if max_epoch_log >= args.epochs-1:
+                # exit the program
+                print(f"Epoch {args.epochs} already exists in the log file. Exiting...")
+                exit()
 
     log_exists = os.path.exists(log_file)
     with open(log_file, 'a', newline='') as f:

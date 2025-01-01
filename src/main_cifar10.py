@@ -143,7 +143,6 @@ log_exists = os.path.exists(log_file)
 file_mode = 'w'
 if args.resume:
     # breakpoint()
-
     if os.path.exists(latest_checkpoint_path):
         checkpoint = torch.load(latest_checkpoint_path)
         net.load_state_dict(checkpoint['net'])
@@ -152,18 +151,21 @@ if args.resume:
         best_acc = checkpoint['best_acc']
         start_epoch = checkpoint['epoch']
         file_mode = 'a'
-        row = None
-        # load the batch size from the csv file
-        epochs = []
-        with open(log_file, 'r') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                epochs.append(int(row['epoch'])) if row else None
-        # if log file is not empty
-        if row:
-            max_epoch_log = max(epochs)
-            if max_epoch_log >= start_epoch:
-                start_epoch = max_epoch_log + 1
+    row = None
+    # load the batch size from the csv file
+    epochs = []
+    with open(log_file, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            epochs.append(int(row['epoch'])) if row else None
+    # if log file is not empty
+    if row:
+        max_epoch_log = max(epochs)
+        
+        if max_epoch_log >= args.epochs-1:
+            # exit the program
+            print(f"Epoch {args.epochs} already exists in the log file. Exiting...")
+            exit()
                 
 
             
@@ -279,8 +281,6 @@ def test(epoch):
         'is_best': is_best
     }
 
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    latest_checkpoint_path = os.path.join(checkpoint_dir, checkpoint_file)
     torch.save(state, latest_checkpoint_path)
     if is_best:
         torch.save(state, best_checkpoint_path)
@@ -324,7 +324,7 @@ if args.algorithm == 'divebatch':
 trainer = trainer_cls(**trainer_args)
 old_grad_diversity = 1.0 if args.algorithm == 'divebatch' else None
 
-
+print(f"{args.algorithm} training from epoch {start_epoch} to {args.epochs-1}...")
 abs_start_time = time.time()
 for epoch in range(start_epoch, args.epochs):
     train_metrics = trainer.train_epoch(trainloader, epoch)
