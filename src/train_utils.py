@@ -16,7 +16,6 @@ class Trainer:
         self.optimizer = optimizer
         self.criterion = criterion
         self.device = device
-        self.num_classes = self.model.fc.out_features
 
     def compute_grad_sum_norm(self, accumulated_grads):
         """Compute the norm of the sum of accumulated gradients."""
@@ -47,7 +46,7 @@ class SGDTrainer(Trainer):
         # else:
         #     accumulation_steps = 1  # No accumulation
 
-
+        self.num_classes =len(set(dataloader.dataset.targets))
         for batch_idx, (inputs, targets) in enumerate(dataloader):
             inputs, targets = inputs.to(self.device), targets.to(self.device)
             current_batch_size = inputs.size(0)
@@ -128,7 +127,7 @@ class DiveBatchTrainer(Trainer):
         self.model.train()
         train_loss, correct, total = 0, 0, 0
         accumulated_grads = [torch.zeros_like(param.detach().cpu()) for param in self.model.parameters()]
-
+        self.num_classes = len(set(dataloader.dataset.targets))
         individual_grad_norm_sum = 0
         self.current_batch_size = dataloader.batch_size 
         for batch_idx, (inputs, targets) in enumerate(dataloader):
@@ -139,7 +138,7 @@ class DiveBatchTrainer(Trainer):
             #     breakpoint()
             self.optimizer.zero_grad()
 
-            if current_batch_size > 1024:
+            if current_batch_size > 1024 and self.num_classes > 101:
 
                 # Define maximum sub-batch size
                 max_sub_batch_size = 1024
