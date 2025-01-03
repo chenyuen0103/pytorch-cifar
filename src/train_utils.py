@@ -16,6 +16,7 @@ class Trainer:
         self.optimizer = optimizer
         self.criterion = criterion
         self.device = device
+        self.num_classes = self.model.fc.out_features
 
     def compute_grad_sum_norm(self, accumulated_grads):
         """Compute the norm of the sum of accumulated gradients."""
@@ -36,21 +37,68 @@ class SGDTrainer(Trainer):
         total = 0
         epoch_start_time = time.time()
 
+        # Initialize gradient accumulation variables if needed
+        # if self.num_classes > 101:
+        #     max_sub_batch_size = 1024
+        #     # Calculate accumulation steps based on batch size and max_sub_batch_size
+        #     accumulation_steps = max(1, self.current_batch_size // max_sub_batch_size)
+        #     if self.current_batch_size % max_sub_batch_size != 0:
+        #         accumulation_steps += 1
+        # else:
+        #     accumulation_steps = 1  # No accumulation
+
+
         for batch_idx, (inputs, targets) in enumerate(dataloader):
             inputs, targets = inputs.to(self.device), targets.to(self.device)
-            self.optimizer.zero_grad()
-            outputs = self.model(inputs)
-            loss = self.criterion(outputs, targets)
-            loss.backward()
-            self.optimizer.step()
+            current_batch_size = inputs.size(0)
 
-            train_loss += loss.item()
-            _, predicted = outputs.max(1)
-            total += targets.size(0)
-            correct += predicted.eq(targets).sum().item()
+            self.optimizer.zero_grad()
+
+            # Determine if gradient accumulation should be applied
+            if self.num_classes > 101 and current_batch_size > 1024:
+                # Split the batch into sub-batches
+                sub_batches = torch.split(inputs, 1024)
+                target_sub_batches = torch.split(targets, 1024)
+
+                for sub_inputs, sub_targets in zip(sub_batches, target_sub_batches):
+                    outputs = self.model(sub_inputs)
+                    loss = self.criterion(outputs, sub_targets)
+                    
+                    # Normalize loss by the number of sub-batches to average gradients
+                    loss = loss / len(sub_batches)
+                    
+                    # Backward pass
+                    loss.backward()
+                    
+                    # Accumulate the loss
+                    train_loss += loss.item() * len(sub_batches)
+                    
+                    # Compute accuracy
+                    _, predicted = outputs.max(1)
+                    total += sub_targets.size(0)
+                    correct += predicted.eq(sub_targets).sum().item()
+                    
+                    # Optional: Implement gradient clipping if needed
+                    # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm)
+
+                # After processing all sub-batches, perform optimizer step
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+            else:
+                outputs = self.model(inputs)
+                loss = self.criterion(outputs, targets)
+                loss.backward()
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+
+
+                train_loss += loss.item()
+                _, predicted = outputs.max(1)
+                total += targets.size(0)
+                correct += predicted.eq(targets).sum().item()
 
             progress_bar(batch_idx, len(dataloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                         % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+                        % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
 
         epoch_time = time.time() - epoch_start_time
         train_acc = 100. * correct / total
@@ -85,32 +133,79 @@ class DiveBatchTrainer(Trainer):
         self.current_batch_size = dataloader.batch_size 
         for batch_idx, (inputs, targets) in enumerate(dataloader):
             inputs, targets = inputs.to(self.device), targets.to(self.device)
+            current_batch_size = inputs.size(0)
             #break if batch_size > 128
             # if inputs.size(0) > 128 or self.current_batch_size > 128:
             #     breakpoint()
             self.optimizer.zero_grad()
 
-            outputs = self.model(inputs)
-            loss = self.criterion(outputs, targets)
+            if current_batch_size > 1024:
 
-            if (self.current_batch_size == self.max_batch_size) or (self.resize_freq != 0 and (epoch + 1) % self.resize_freq == 0):
-                set_bn_eval(self.model)
-                with backpack(BatchL2Grad()):
-                    loss.backward()
-                set_bn_train(self.model)
-                for j, param in enumerate(self.model.parameters()):
-                    accumulated_grads[j] += param.grad.detach().cpu().clone()
-                    individual_grad_norm_sum += (param.batch_l2).sum().item()
-                    # breakpoint()
+                # Define maximum sub-batch size
+                max_sub_batch_size = 1024
+
+                # Split the batch into sub-batches
+                sub_batches = torch.split(inputs, max_sub_batch_size)
+                target_sub_batches = torch.split(targets, max_sub_batch_size)
+                num_sub_batches = len(sub_batches)
+
+                for sub_idx, (sub_inputs, sub_targets) in enumerate(zip(sub_batches, target_sub_batches)):
+                    # Forward pass
+                    outputs = self.model(sub_inputs)
+                    loss = self.criterion(outputs, sub_targets)
+
+                    # Normalize loss by the number of sub-batches to average gradients
+                    loss = loss / num_sub_batches
+
+                    if (self.current_batch_size != self.max_batch_size) and (self.resize_freq != 0 and (epoch + 1) % self.resize_freq == 0):
+                        set_bn_eval(self.model)
+                        with backpack(BatchL2Grad()):
+                            loss.backward()
+                        set_bn_train(self.model)
+                        for j, param in enumerate(self.model.parameters()):
+                            accumulated_grads[j] += param.grad.detach().cpu().clone()
+                            individual_grad_norm_sum += (param.batch_l2).sum().item()
+                            # breakpoint()
+                    else:
+                        loss.backward()
+
+                    # Accumulate the loss (scale back to original loss)
+                    train_loss += loss.item() * num_sub_batches
+
+                    # Compute accuracy
+                    _, predicted = outputs.max(1)
+                    total += sub_targets.size(0)
+                    correct += predicted.eq(sub_targets).sum().item()
+
+
+                    # Optional: Implement gradient clipping if needed
+                    # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+
+                # After processing all sub-batches, perform optimizer step
+                self.optimizer.step()
+                self.optimizer.zero_grad()
             else:
-                loss.backward()
+                outputs = self.model(inputs)
+                loss = self.criterion(outputs, targets)
 
-            self.optimizer.step()
+                if (self.current_batch_size != self.max_batch_size) and (self.resize_freq != 0 and (epoch + 1) % self.resize_freq == 0):
+                    set_bn_eval(self.model)
+                    with backpack(BatchL2Grad()):
+                        loss.backward()
+                    set_bn_train(self.model)
+                    for j, param in enumerate(self.model.parameters()):
+                        accumulated_grads[j] += param.grad.detach().cpu().clone()
+                        individual_grad_norm_sum += (param.batch_l2).sum().item()
+                        # breakpoint()
+                else:
+                    loss.backward()
 
-            train_loss += loss.item()
-            _, predicted = outputs.max(1)
-            total += targets.size(0)
-            correct += predicted.eq(targets).sum().item()
+                self.optimizer.step()
+
+                train_loss += loss.item()
+                _, predicted = outputs.max(1)
+                total += targets.size(0)
+                correct += predicted.eq(targets).sum().item()
             progress_bar(batch_idx, len(dataloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
 
