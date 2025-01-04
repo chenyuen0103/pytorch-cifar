@@ -11,11 +11,12 @@ import os
 import time
 
 class Trainer:
-    def __init__(self, model, optimizer, criterion, device):
+    def __init__(self, model, optimizer, criterion, device, num_classes=100):
         self.model = model
         self.optimizer = optimizer
         self.criterion = criterion
         self.device = device
+        self.num_classes = num_classes
 
     def compute_grad_sum_norm(self, accumulated_grads):
         """Compute the norm of the sum of accumulated gradients."""
@@ -46,7 +47,7 @@ class SGDTrainer(Trainer):
         # else:
         #     accumulation_steps = 1  # No accumulation
 
-        self.num_classes =len(set(dataloader.dataset.targets))
+
         for batch_idx, (inputs, targets) in enumerate(dataloader):
             inputs, targets = inputs.to(self.device), targets.to(self.device)
             current_batch_size = inputs.size(0)
@@ -109,7 +110,7 @@ class SGDTrainer(Trainer):
 
 
 class DiveBatchTrainer(Trainer):
-    def __init__(self, model, optimizer, criterion, device, resize_freq, max_batch_size, min_batch_size=128, delta=0.02, dataset_size=50000):
+    def __init__(self, model, optimizer, criterion, device, resize_freq, max_batch_size, min_batch_size=128, delta=0.02, dataset_size=50000, num_classes=100):
         super().__init__(model, optimizer, criterion, device)
         self.resize_freq = resize_freq
         self.max_batch_size = max_batch_size
@@ -117,6 +118,7 @@ class DiveBatchTrainer(Trainer):
         self.last_grad_diversity = 1 # To store the last gradient diversity
         self.delta = delta  # Threshold delta for gradient diversity
         self.dataset_size = dataset_size
+        self.num_classes = num_classes
         # Ensure model and criterion are extended once
         # if not hasattr(model, 'backpack_extensions'):
         #     self.model = extend(model)
@@ -127,7 +129,6 @@ class DiveBatchTrainer(Trainer):
         self.model.train()
         train_loss, correct, total = 0, 0, 0
         accumulated_grads = [torch.zeros_like(param.detach().cpu()) for param in self.model.parameters()]
-        self.num_classes = len(set(dataloader.dataset.targets))
         individual_grad_norm_sum = 0
         self.current_batch_size = dataloader.batch_size 
         for batch_idx, (inputs, targets) in enumerate(dataloader):
@@ -137,7 +138,6 @@ class DiveBatchTrainer(Trainer):
             # if inputs.size(0) > 128 or self.current_batch_size > 128:
             #     breakpoint()
             self.optimizer.zero_grad()
-
             if current_batch_size > 1024 and self.num_classes > 101:
 
                 # Define maximum sub-batch size
@@ -352,3 +352,4 @@ def set_bn_train(model):
     for module in model.modules():
         if isinstance(module, nn.BatchNorm2d):
             module.train()
+
