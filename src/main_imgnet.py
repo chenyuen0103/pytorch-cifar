@@ -85,7 +85,7 @@ parser.add_argument('--checkpoint_dir', default='/projects/bdeb/chenyuen0103/che
 # New arguments for DiveBatchTrainer
 parser.add_argument('--resize_freq', default=20, type=int,
                     help='Frequency (in epochs) to resize batch size')
-parser.add_argument('--max_batch_size', default=256, type=int,
+parser.add_argument('--max_batch_size', default=2048, type=int,
                     help='Maximum allowable batch size')
 parser.add_argument('--delta', default=0.02, type=float,
                     help='Threshold delta for gradient diversity')
@@ -178,11 +178,11 @@ def main():
     os.makedirs(log_dir, exist_ok=True)
 
     if args.algorithm == 'sgd':
-        log_file = os.path.join(log_dir, f'{args.algorithm}_lr{scaled_lr}_bs{effective_bs}_seed{args.seed}.csv')
+        log_file = os.path.join(log_dir, f'{args.algorithm}_lr{scaled_lr}_bs{effective_bs}_s{args.seed}.csv')
     elif args.algorithm == 'divebatch':
-        log_file = os.path.join(log_dir, f'{args.algorithm}_lr{args.lr}_bs{args.batch_size}_rf{args.resize_freq}_mbs{args.max_batch_size}_delta{args.delta}_seed{args.seed}.csv')
+        log_file = os.path.join(log_dir, f'{args.algorithm}_lr{args.lr}_bs{args.batch_size}_rf{args.resize_freq}_mbs{args.max_batch_size}_delta{args.delta}_s{args.seed}.csv')
     elif args.algorithm == 'adabatch':
-        log_file = os.path.join(log_dir, f'{args.algorithm}_lr{args.lr}_bs{args.batch_size}_seed{args.seed}.csv')
+        log_file = os.path.join(log_dir, f'{args.algorithm}_lr{args.lr}_bs{args.batch_size}_s{args.seed}.csv')
     else:
         raise ValueError(f"Unknown algorithm {args.algorithm}")
 
@@ -192,7 +192,6 @@ def main():
     checkpoint_dir = os.path.join(args.checkpoint_dir, args.arch, 'imagenet')
     os.makedirs(checkpoint_dir, exist_ok=True)
     checkpoint_file = f"{args.algorithm}_lr{args.lr}_bs{args.batch_size}_ckpt.pth"
-
     log_exists = os.path.exists(log_file)
     batch_size = args.batch_size
     # Optionally resume from a checkpoint
@@ -252,8 +251,7 @@ def main():
     with open(log_file, 'a', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=[
             'epoch', 'train_loss', 'train_acc1',
-            'val_loss', 'val_acc1', 'val_acc5',
-            'best_acc1', 'learning_rate', 'batch_size',
+            'val_loss', 'val_acc1', 'val_acc5', 'learning_rate', 'batch_size',
             'epoch_time', 'eval_time', 'abs_time',
             'memory_allocated_mb', 'memory_reserved_mb', 'grad_diversity'
         ])
