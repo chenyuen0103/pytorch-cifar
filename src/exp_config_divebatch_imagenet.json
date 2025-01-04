@@ -5,6 +5,7 @@
             "divebatch": {
                 "lr": [0.01],
                 "batch_size": [256],
+                "max_batch_size": [2048, 4096],
                 "flags": [
                     [],
                     ["--adaptive_lr"],

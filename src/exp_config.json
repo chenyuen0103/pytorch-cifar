@@ -5,11 +5,13 @@
             "sgd": {
                 "lr": [0.1, 1.6],
                 "batch_size": [128, 2048],
+                "max_batch_size": [2048],
                 "flags": [[]]
             },
             "adabatch": {
                 "lr": [0.1],
                 "batch_size": [128],
+                "max_batch_size": [2048],
                 "flags": [
                     [],
                     ["--adaptive_lr"],
@@ -25,11 +27,13 @@
             "sgd": {
                 "lr": [0.01, 0.16],
                 "batch_size": [256, 2048],
+                "max_batch_size": [2048, 4096],
                 "flags": [[]]
             },
             "adabatch": {
                 "lr": [0.01],
                 "batch_size": [256],
+                "max_batch_size": [2048, 4096],
                 "flags": [
                     [],
                     ["--adaptive_lr"],

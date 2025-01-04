@@ -138,13 +138,14 @@ def generate_commands_from_config(config: dict, args):
         for algo, algo_params in algorithms.items():
             lrs = algo_params.get("lr", [0.1])
             batch_sizes = algo_params.get("batch_size", [128])
+            max_batch_size = algo_params.get("max_batch_size", 0)
             flags_list = algo_params.get("flags", [[]])
-            for seed, lr, bs, flags in itertools.product(seed_range, lrs, batch_sizes, flags_list):
+            for seed, lr, bs, mbs, flags in itertools.product(seed_range, lrs, batch_sizes, max_batch_size,flags_list):
                 flags_str = ' '.join(flags)
                 if args.resume:
-                    cmd = f"{scripts_cmd} --algorithm {algo} --lr {lr} --batch_size {bs} --seed {seed} --resume {flags_str}".strip()
+                    cmd = f"{scripts_cmd} --algorithm {algo} --lr {lr} --batch_size {bs} --max_batch_size {mbs} --seed {seed} --resume {flags_str}".strip()
                 else:
-                    cmd = f"{scripts_cmd} --algorithm {algo} --lr {lr} --batch_size {bs} --seed {seed} {flags_str}".strip()
+                    cmd = f"{scripts_cmd} --algorithm {algo} --lr {lr} --batch_size {bs} --max_batch_size {mbs} --seed {seed} {flags_str}".strip()
                 commands.append(cmd)
     return commands
 
