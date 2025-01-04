@@ -27,7 +27,7 @@ import torchvision.transforms as transforms
 from torch.optim.lr_scheduler import StepLR
 
 from dataset_loader import CustomImageNetDataset, get_dataloader
-from train_utils import  test, DiveBatchTrainer, SGDTrainer
+from train_utils import test, DiveBatchTrainer, SGDTrainer
 from backpack import extend
 from utils import progress_bar
 
@@ -89,7 +89,7 @@ parser.add_argument('--max_batch_size', default=256, type=int,
                     help='Maximum allowable batch size')
 parser.add_argument('--delta', default=0.02, type=float,
                     help='Threshold delta for gradient diversity')
-parser.add_argument('--seed', default=None, type=int,
+parser.add_argument('--seed', default=1, type=int,
                     help='Seed for random number generator')
 
 
@@ -174,15 +174,15 @@ def main():
     
 
     # Create log directory and file
-    log_dir = os.path.join(args.log_dir, 'imagenet', args.arch)
+    log_dir = os.path.join(args.log_dir, args.arch, 'imagenet')
     os.makedirs(log_dir, exist_ok=True)
 
     if args.algorithm == 'sgd':
-        log_file = os.path.join(log_dir, f'{args.algorithm}_lr{scaled_lr}_bs{effective_bs}.csv')
+        log_file = os.path.join(log_dir, f'{args.algorithm}_lr{scaled_lr}_bs{effective_bs}_seed{args.seed}.csv')
     elif args.algorithm == 'divebatch':
-        log_file = os.path.join(log_dir, f'{args.algorithm}_lr{args.lr}_bs{args.batch_size}_rf{args.resize_freq}_mbs{args.max_batch_size}_delta{args.delta}.csv')
+        log_file = os.path.join(log_dir, f'{args.algorithm}_lr{args.lr}_bs{args.batch_size}_rf{args.resize_freq}_mbs{args.max_batch_size}_delta{args.delta}_seed{args.seed}.csv')
     elif args.algorithm == 'adabatch':
-        log_file = os.path.join(log_dir, f'{args.algorithm}_lr{args.lr}_bs{args.batch_size}.csv')
+        log_file = os.path.join(log_dir, f'{args.algorithm}_lr{args.lr}_bs{args.batch_size}_seed{args.seed}.csv')
     else:
         raise ValueError(f"Unknown algorithm {args.algorithm}")
 
@@ -193,7 +193,7 @@ def main():
     os.makedirs(checkpoint_dir, exist_ok=True)
     checkpoint_file = f"{args.algorithm}_lr{args.lr}_bs{args.batch_size}_ckpt.pth"
 
-
+    log_exists = os.path.exists(log_file)
     batch_size = args.batch_size
     # Optionally resume from a checkpoint
     best_acc1 = 0
@@ -229,23 +229,29 @@ def main():
         row = None
         # load the batch size from the csv file
         epochs = []
-        with open(log_file, 'r') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                epochs.append(int(row['epoch'])) if row else None
-        # if log file is not empty
-        if row:
-            max_epoch_log = max(epochs)
-            
-            if max_epoch_log >= args.epochs-1:
-                # exit the program
-                print(f"Epoch {args.epochs} already exists in the log file. Exiting...")
-                exit()
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, 'r') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        epochs.append(int(row['epoch'])) if row else None
+                # if log file is not empty
+                if row:
+                    max_epoch_log = max(epochs)
+                    
+                    if max_epoch_log >= args.epochs-1:
+                        # exit the program
+                        print(f"Epoch {args.epochs} already exists in the log file. Exiting...")
+                        exit()
+            except ValueError:
+                print("Error reading log file, starting from epoch 0")
+                args.start_epoch = 0
 
-    log_exists = os.path.exists(log_file)
+
+    
     with open(log_file, 'a', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=[
-            'epoch', 'train_loss', 'train_acc1', 'train_acc5',
+            'epoch', 'train_loss', 'train_acc1',
             'val_loss', 'val_acc1', 'val_acc5',
             'best_acc1', 'learning_rate', 'batch_size',
             'epoch_time', 'eval_time', 'abs_time',
@@ -317,6 +323,7 @@ def main():
         "optimizer": optimizer,
         "criterion": criterion,
         "device": device,
+        "num_classes": num_classes,
     }
     if args.algorithm == 'divebatch':
         trainer_args.update({
@@ -324,6 +331,7 @@ def main():
             "resize_freq": args.resize_freq,
             "max_batch_size": args.max_batch_size,
         })
+    # breakpoint()
     trainer = trainer_cls(**trainer_args)
     old_grad_diversity = 1.0 if args.algorithm == 'divebatch' else None
     # Training loop
@@ -385,7 +393,7 @@ def main():
         torch.save(state, latest_checkpoint_path)
         if is_best:
             torch.save(state, best_checkpoint_path)
-
+        # breakpoint()
         # epoch_time = time.time() - epoch_start_time
         log_metrics(
             log_file=log_file,
@@ -397,13 +405,12 @@ def main():
             val_acc5=val_acc5,
             lr=optimizer.param_groups[0]['lr'],
             batch_size=batch_size,
-            epoch_time=train_metrics.get("epoch_time", 0),
+            epoch_time= val_start_time - epoch_start_time,
             eval_time=eval_time,
             abs_time = time.time() - abs_start_time,
             memory_allocated=torch.cuda.memory_allocated() if device == 'cuda' else 0,
             memory_reserved=torch.cuda.memory_reserved() if device == 'cuda' else 0,
             grad_diversity=train_metrics.get("grad_diversity"),
-            abs_start_time=abs_start_time
         )
 
 
@@ -455,12 +462,6 @@ def validate(val_loader, model, criterion, args):
     progress.display_summary()
 
     return losses.avg, top1.avg, top5.avg
-
-def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
-    torch.save(state, filename)
-    if is_best:
-        best_path = os.path.join(os.path.dirname(filename), 'model_best.pth.tar')
-        shutil.copyfile(filename, best_path)
 
 class Summary(Enum):
     NONE = 0
