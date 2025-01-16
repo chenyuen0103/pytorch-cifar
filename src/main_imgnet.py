@@ -30,6 +30,7 @@ from dataset_loader import CustomImageNetDataset, get_dataloader
 from train_utils import test, DiveBatchTrainer, SGDTrainer
 from backpack import extend
 from utils import progress_bar
+import numpy as np
 
 from datasets import load_from_disk
 
@@ -87,13 +88,19 @@ parser.add_argument('--resize_freq', default=20, type=int,
                     help='Frequency (in epochs) to resize batch size')
 parser.add_argument('--max_batch_size', default=2048, type=int,
                     help='Maximum allowable batch size')
-parser.add_argument('--delta', default=0.02, type=float,
+parser.add_argument('--delta', default=0.01, type=float,
                     help='Threshold delta for gradient diversity')
 parser.add_argument('--seed', default=1, type=int,
                     help='Seed for random number generator')
 
 
 best_acc1 = 0
+
+fieldnames=[
+            'epoch', 'train_loss', 'train_acc', 'val_loss', 'val_acc1','val_acc5',
+            'learning_rate', 'batch_size', 'epoch_time', 'eval_time', 'abs_time', 'memory_allocated_mb', 'memory_reserved_mb', 'grad_diversity'
+        ]
+    
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def main():
@@ -196,6 +203,7 @@ def main():
     batch_size = args.batch_size
     # Optionally resume from a checkpoint
     best_acc1 = 0
+   
     if args.algorithm == 'sgd':
         checkpoint_file = f"{args.algorithm}_lr{args.lr}_bs{args.batch_size}_s{args.seed}_ckpt.pth"
     elif args.algorithm == 'divebatch':
@@ -208,23 +216,22 @@ def main():
     if args.adaptive_lr and args.algorithm != 'sgd':
         latest_checkpoint_path = latest_checkpoint_path.replace('.pth', '_rescale.pth')
         best_checkpoint_path = best_checkpoint_path.replace('.pth', '_rescale.pth')
-        
+    file_mode = 'w'
+    start_epoch = 0
+
+    # breakpoint()
     if args.resume:
-        # breakpoint()
         if os.path.exists(latest_checkpoint_path):
-            # breakpoint()
             print(f"=> loading checkpoint {latest_checkpoint_path}")
             checkpoint = torch.load(latest_checkpoint_path, map_location=device)
-            args.start_epoch = checkpoint['epoch']
+            start_epoch = checkpoint['epoch']
             best_acc1 = checkpoint['best_acc1']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
             scheduler.load_state_dict(checkpoint['scheduler'])
             batch_size = checkpoint['batch_size']
             print(f"=> loaded checkpoint (epoch {checkpoint['epoch']})")
-        else:
-            print(f"=> no checkpoint found at '{latest_checkpoint_path}'")
-
+            file_mode = 'a'
         row = None
         # load the batch size from the csv file
         epochs = []
@@ -237,24 +244,20 @@ def main():
                 # if log file is not empty
                 if row:
                     max_epoch_log = max(epochs)
-                    
                     if max_epoch_log >= args.epochs-1:
+                        file_mode = 'a'
                         # exit the program
                         print(f"Epoch {args.epochs} already exists in the log file. Exiting...")
                         exit()
             except ValueError:
                 print("Error reading log file, starting from epoch 0")
-                args.start_epoch = 0
+                start_epoch = 0
+    
 
 
     
-    with open(log_file, 'a', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            'epoch', 'train_loss', 'train_acc1',
-            'val_loss', 'val_acc1', 'val_acc5', 'learning_rate', 'batch_size',
-            'epoch_time', 'eval_time', 'abs_time',
-            'memory_allocated_mb', 'memory_reserved_mb', 'grad_diversity'
-        ])
+    with open(log_file, file_mode, newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         if not log_exists or not args.resume:
             writer.writeheader()
 
@@ -334,7 +337,7 @@ def main():
     old_grad_diversity = 1.0 if args.algorithm == 'divebatch' else None
     # Training loop
     abs_start_time = time.time()
-    for epoch in range(args.start_epoch, args.epochs):
+    for epoch in range(start_epoch, args.epochs):
         epoch_start_time = time.time()
         train_metrics = trainer.train_epoch(trainloader, epoch)
         # val_loss, val_acc, eval_time = test(epoch)
@@ -342,6 +345,24 @@ def main():
         val_start_time = time.time()
         val_loss, val_acc1, val_acc5 = validate(val_loader, model, criterion, args)
         eval_time = time.time() - val_start_time
+
+        log_metrics(
+            log_file=log_file,
+            epoch=epoch + 1,
+            train_loss=train_metrics["train_loss"],
+            train_acc=train_metrics["train_accuracy"],
+            val_loss=val_loss,
+            val_acc1=val_acc1,
+            val_acc5=val_acc5,
+            lr=optimizer.param_groups[0]['lr'],
+            batch_size=batch_size,
+            epoch_time= val_start_time - epoch_start_time,
+            eval_time=eval_time,
+            abs_time = time.time() - abs_start_time,
+            memory_allocated=train_metrics.get("memory_allocated"),
+            memory_reserved=train_metrics.get("memory_reserved"),
+            grad_diversity=train_metrics.get("grad_diversity"),
+        )
         scheduler.step()
 
         if (epoch + 1) % args.resize_freq == 0 and args.algorithm in ['divebatch', 'adabatch'] and batch_size < args.max_batch_size:
@@ -352,14 +373,10 @@ def main():
             elif args.algorithm == 'adabatch':
                 rescale_ratio = 2
 
-            batch_size = int(min(old_batch_size * rescale_ratio, args.max_batch_size))
+            # batch_size = int(min(old_batch_size * rescale_ratio, args.max_batch_size))
+            batch_size = update_batch_size(grad_diversity, args.delta, len(train_dataset), old_batch_size, args.max_batch_size)
             
             if batch_size != old_batch_size:
-                # Update the batch size argument
-                # batch_size = new_batch_size
-                # print(f"Updating DataLoader with new batch size: {batch_size}")
-                # trainer.accum_steps = new_batch_size // args.batch_size
-                # Recreate DataLoader with the new batch size
                 print(f"Recreating trainloader with batch size: {batch_size}...")
                 trainloader = torch.utils.data.DataLoader(
                     train_dataset, 
@@ -372,7 +389,7 @@ def main():
             if args.algorithm != 'sgd' and args.adaptive_lr:
                 # rescale the learning rate
                 for param_group in optimizer.param_groups:
-                    param_group['lr'] *= rescale_ratio
+                    param_group['lr'] *= (batch_size / old_batch_size)
                 
 
         # Update best accuracy
@@ -393,23 +410,7 @@ def main():
             torch.save(state, best_checkpoint_path)
         # breakpoint()
         # epoch_time = time.time() - epoch_start_time
-        log_metrics(
-            log_file=log_file,
-            epoch=epoch + 1,
-            train_loss=train_metrics["train_loss"],
-            train_acc=train_metrics["train_accuracy"],
-            val_loss=val_loss,
-            val_acc1=val_acc1,
-            val_acc5=val_acc5,
-            lr=optimizer.param_groups[0]['lr'],
-            batch_size=batch_size,
-            epoch_time= val_start_time - epoch_start_time,
-            eval_time=eval_time,
-            abs_time = time.time() - abs_start_time,
-            memory_allocated=torch.cuda.memory_allocated() if device == 'cuda' else 0,
-            memory_reserved=torch.cuda.memory_reserved() if device == 'cuda' else 0,
-            grad_diversity=train_metrics.get("grad_diversity"),
-        )
+
 
 
 def validate(val_loader, model, criterion, args):
@@ -587,14 +588,12 @@ def get_imagenet_dataset(args, is_train=True):
 
 
 def log_metrics(log_file, epoch, train_loss, train_acc, val_loss, val_acc1, val_acc5, lr, batch_size, epoch_time, eval_time, abs_time, memory_allocated, memory_reserved, grad_diversity=None, abs_start_time=None):
+    global fieldnames
     memory_allocated_mb = memory_allocated / (1024 * 1024)
     memory_reserved_mb = memory_reserved / (1024 * 1024)
     
     with open(log_file, 'a', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            'epoch', 'train_loss', 'train_acc', 'val_loss', 'val_acc1','val_acc5',
-            'learning_rate', 'batch_size', 'epoch_time', 'eval_time', 'abs_time', 'memory_allocated_mb', 'memory_reserved_mb', 'grad_diversity'
-        ])
+        writer = csv.DictWriter(f, fieldnames = fieldnames)
         writer.writerow({
             'epoch': epoch,
             'train_loss': train_loss,
@@ -612,6 +611,20 @@ def log_metrics(log_file, epoch, train_loss, train_acc, val_loss, val_acc1, val_
             'grad_diversity': round(grad_diversity, 4) if grad_diversity is not None else None,
         })
 
+
+def update_batch_size(gd, delta, dataset_size, old_batch_size, max_batch_size):
+    if np.isnan(gd) or np.isinf(gd):
+        return max_batch_size
+    if old_batch_size == max_batch_size:
+        return max_batch_size
+    new_batch_size = int(min(max(delta * gd * dataset_size, old_batch_size), max_batch_size))
+    # breakpoint()
+    # new_batch_size = int(min(max(delta * new_gd * dataset_size, old_batch_size), dataset_size))
+
+    # new_batch_size = int(min(max(delta * new_gd * dataset_size**2, old_batch_size, 2048)))
+    # new_batch_size = int(min(max(delta * new_gd * dataset_size**2, old_batch_size), dataset_size))
+    # print(f'New batch size: {new_batch_size}, outcome of min(max({grad_diversity}, {old_batch_size}), {dataset_size}) = {int(min(max(grad_diversity, old_batch_size), dataset_size))}')
+    return new_batch_size
 
 if __name__ == '__main__':
     main()

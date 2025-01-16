@@ -31,11 +31,12 @@ class Trainer:
 
 class SGDTrainer(Trainer):
     def train_epoch(self, dataloader, epoch):
+        epoch_start_time = time.time()
+        torch.cuda.reset_peak_memory_stats()
         self.model.train()
         train_loss = 0
         correct = 0
         total = 0
-        epoch_start_time = time.time()
 
         # Initialize gradient accumulation variables if needed
         # if self.num_classes > 101:
@@ -55,10 +56,14 @@ class SGDTrainer(Trainer):
             self.optimizer.zero_grad()
 
             # Determine if gradient accumulation should be applied
-            if self.num_classes > 101 and current_batch_size > 1024:
+            if (self.num_classes > 101 and current_batch_size > 1024) or (self.num_classes <= 101 and current_batch_size > 2048):
                 # Split the batch into sub-batches
-                sub_batches = torch.split(inputs, 1024)
-                target_sub_batches = torch.split(targets, 1024)
+                if self.num_classes > 101:
+                    sub_batches = torch.split(inputs, 512)
+                    target_sub_batches = torch.split(targets, 512)
+                else:
+                    sub_batches = torch.split(inputs, 2048)
+                    target_sub_batches = torch.split(targets, 2048)
 
                 for sub_inputs, sub_targets in zip(sub_batches, target_sub_batches):
                     outputs = self.model(sub_inputs)
@@ -83,6 +88,7 @@ class SGDTrainer(Trainer):
 
                 # After processing all sub-batches, perform optimizer step
                 self.optimizer.step()
+
                 self.optimizer.zero_grad()
             else:
                 outputs = self.model(inputs)
@@ -100,12 +106,16 @@ class SGDTrainer(Trainer):
             progress_bar(batch_idx, len(dataloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                         % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
 
-        epoch_time = time.time() - epoch_start_time
         train_acc = 100. * correct / total
+        peak_memory_allocated = torch.cuda.max_memory_allocated()
+        peak_memory_reserved = torch.cuda.max_memory_reserved()
         return {
             "train_loss": train_loss / len(dataloader),
             "train_accuracy": train_acc,
-            "epoch_time": epoch_time
+            "epoch_time": time.time() - epoch_start_time,
+            'memory_allocated': peak_memory_allocated,
+            'memory_reserved': peak_memory_reserved
+
         }
 
 
@@ -126,6 +136,8 @@ class DiveBatchTrainer(Trainer):
             self.criterion = extend(criterion)
 
     def train_epoch(self, dataloader, epoch):
+        torch.cuda.reset_peak_memory_stats()
+        epoch_start_time = time.time()
         self.model.train()
         train_loss, correct, total = 0, 0, 0
         accumulated_grads = [torch.zeros_like(param.detach().cpu()) for param in self.model.parameters()]
@@ -134,19 +146,20 @@ class DiveBatchTrainer(Trainer):
         for batch_idx, (inputs, targets) in enumerate(dataloader):
             inputs, targets = inputs.to(self.device), targets.to(self.device)
             current_batch_size = inputs.size(0)
-            #break if batch_size > 128
-            # if inputs.size(0) > 128 or self.current_batch_size > 128:
-            #     breakpoint()
             self.optimizer.zero_grad()
-            if current_batch_size > 1024 and self.num_classes > 101:
+            if current_batch_size > 512 and self.num_classes > 101 or current_batch_size > 2048 and self.num_classes <= 101:
+                if current_batch_size > 512 and self.num_classes > 101:
+                    # Define maximum sub-batch size
+                    max_sub_batch_size = 512
 
-                # Define maximum sub-batch size
-                max_sub_batch_size = 1024
-
+                elif current_batch_size > 2048:
+                    # Define maximum sub-batch size
+                    max_sub_batch_size = 2048
                 # Split the batch into sub-batches
                 sub_batches = torch.split(inputs, max_sub_batch_size)
                 target_sub_batches = torch.split(targets, max_sub_batch_size)
                 num_sub_batches = len(sub_batches)
+
 
                 for sub_idx, (sub_inputs, sub_targets) in enumerate(zip(sub_batches, target_sub_batches)):
                     # Forward pass
@@ -174,15 +187,14 @@ class DiveBatchTrainer(Trainer):
                     # Compute accuracy
                     _, predicted = outputs.max(1)
                     total += sub_targets.size(0)
+                    # print(total)
                     correct += predicted.eq(sub_targets).sum().item()
-
-
                     # Optional: Implement gradient clipping if needed
                     # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-
                 # After processing all sub-batches, perform optimizer step
                 self.optimizer.step()
-                self.optimizer.zero_grad()
+                peak_memory_allocated = torch.cuda.max_memory_allocated()
+                peak_memory_reserved = torch.cuda.max_memory_reserved()
             else:
                 outputs = self.model(inputs)
                 loss = self.criterion(outputs, targets)
@@ -200,11 +212,17 @@ class DiveBatchTrainer(Trainer):
                     loss.backward()
 
                 self.optimizer.step()
+            
+                peak_memory_allocated = torch.cuda.max_memory_allocated()
+                peak_memory_reserved = torch.cuda.max_memory_reserved()
 
                 train_loss += loss.item()
                 _, predicted = outputs.max(1)
                 total += targets.size(0)
                 correct += predicted.eq(targets).sum().item()
+            
+            if total < 10e-3:
+                breakpoint()
             progress_bar(batch_idx, len(dataloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
 
@@ -216,7 +234,10 @@ class DiveBatchTrainer(Trainer):
         return {
             "train_loss": train_loss / len(dataloader),
             "train_accuracy": 100. * correct / total,
-            "grad_diversity": grad_diversity
+            "grad_diversity": grad_diversity,
+            "epoch_time": time.time() - epoch_start_time,
+            'memory_allocated': peak_memory_allocated,
+            'memory_reserved': peak_memory_reserved
         }
 
     def compute_gradient_diversity(self, grad_sum_norm, individual_grad_norms):

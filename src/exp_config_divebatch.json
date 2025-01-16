@@ -5,30 +5,15 @@
             "divebatch": {
                 "lr": [0.1],
                 "batch_size": [128],
-                "max_batch_size": [2048, 4096],
+                "max_batch_size": [2048],
                 "flags": [
-                    [],
-                    ["--adaptive_lr"],
-                    ["--resize_freq", "20"],
-                    ["--resize_freq", "20", "--adaptive_lr"]
-                ]
-            }
-        }
-    },
-    "main_imgnet.py": {
-        "scripts": "python main_imgnet.py",
-        "algorithms": {
-            "divebatch": {
-                "lr": [0.01],
-                "batch_size": [256],
-                "max_batch_size": [2048, 4096],
-                "flags": [
-                    [],
-                    ["--adaptive_lr"],
-                    ["--resize_freq", "20"],
-                    ["--resize_freq", "20", "--adaptive_lr"]
+                    ["--delta", "0.1"],
+                    ["--adaptive_lr", "--delta", "0.1"],
+                    ["--resize_freq", "20", "--delta", "0.1"],
+                    ["--resize_freq", "20", "--adaptive_lr", "--delta", "0.1"]
                 ]
             }
         }
     }
+    
 }

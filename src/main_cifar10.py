@@ -17,6 +17,7 @@ from train_utils import log_metrics, test, DiveBatchTrainer, SGDTrainer
 import time
 import csv
 from backpack import extend
+import numpy as np
 
 
 
@@ -150,22 +151,31 @@ if args.resume:
         scheduler.load_state_dict(checkpoint['scheduler'])
         best_acc = checkpoint['best_acc']
         start_epoch = checkpoint['epoch']
+        batch_size = checkpoint['batch_size'] if 'batch_size' in checkpoint else args.batch_size
         file_mode = 'a'
     row = None
     # load the batch size from the csv file
     epochs = []
-    with open(log_file, 'r') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            epochs.append(int(row['epoch'])) if row else None
-    # if log file is not empty
-    if row:
-        max_epoch_log = max(epochs)
-        
-        if max_epoch_log >= args.epochs-1:
-            # exit the program
-            print(f"Epoch {args.epochs} already exists in the log file. Exiting...")
-            exit()
+    if log_exists:
+        with open(log_file, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row:
+                    epochs.append(int(row['epoch'])) if row else None
+        # if log file is not empty
+        # breakpoint()
+        # if args.adaptive_lr:
+        #     breakpoint()
+        if row:
+            max_epoch_log = max(epochs)
+            # breakpoint()
+            if max_epoch_log >= args.epochs-1:
+                # exit the program
+                print(f"Epoch {args.epochs} already exists in the log file. Exiting...")
+                exit()
+            if batch_size == args.batch_size:
+                # Double checking batch size
+                batch_size = int(row['batch_size'])
                 
 
             
@@ -209,39 +219,40 @@ elif args.dataset == 'cifar100':
         testset, batch_size=100, shuffle=False, num_workers=2)
 
 
-with open(log_file, file_mode, newline='') as f:
-    writer = csv.DictWriter(f, fieldnames=fieldnames)
-    # Write the header only if the file is new
-    if not log_exists or not args.resume:
-        writer.writeheader()
+    with open(log_file, file_mode, newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        # Write the header only if the file is new
+        if not log_exists or not args.resume:
+            writer.writeheader()
 
 
 # Training
-def train(epoch):
-    print('\nEpoch: %d' % epoch)
-    net.train()
-    train_loss = 0
-    correct = 0
-    total = 0
-    epoch_start_time = time.time()
-    for batch_idx, (inputs, targets) in enumerate(trainloader):
-        inputs, targets = inputs.to(device), targets.to(device)
-        optimizer.zero_grad()
-        outputs = net(inputs)
-        loss = criterion(outputs, targets)
-        loss.backward()
-        optimizer.step()
+# breakpoint()
+# def train(epoch):
+#     print('\nEpoch: %d' % epoch)
+#     net.train()
+#     train_loss = 0
+#     correct = 0
+#     total = 0
+#     epoch_start_time = time.time()
+#     for batch_idx, (inputs, targets) in enumerate(trainloader):
+#         inputs, targets = inputs.to(device), targets.to(device)
+#         optimizer.zero_grad()
+#         outputs = net(inputs)
+#         loss = criterion(outputs, targets)
+#         loss.backward()
+#         optimizer.step()
 
-        train_loss += loss.item()
-        _, predicted = outputs.max(1)
-        total += targets.size(0)
-        correct += predicted.eq(targets).sum().item()
+#         train_loss += loss.item()
+#         _, predicted = outputs.max(1)
+#         total += targets.size(0)
+#         correct += predicted.eq(targets).sum().item()
 
-        progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                     % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
-        epoch_time = time.time() - epoch_start_time
-        train_acc = 100. * correct / total       
-    return train_loss / len(trainloader), train_acc, epoch_time
+#         progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+#                      % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
+#         epoch_time = time.time() - epoch_start_time
+#         train_acc = 100. * correct / total       
+#     return train_loss / len(trainloader), train_acc, epoch_time
 
 
 
@@ -278,7 +289,8 @@ def test(epoch):
         'current_acc': acc,
         'optimizer': optimizer.state_dict(),
         'scheduler': scheduler.state_dict(),
-        'is_best': is_best
+        'is_best': is_best,
+        'batch_size': batch_size,
     }
 
     torch.save(state, latest_checkpoint_path)
@@ -343,8 +355,8 @@ for epoch in range(start_epoch, args.epochs):
         epoch_time=train_metrics.get("epoch_time", 0),
         eval_time=eval_time,
         abs_time = time.time() - abs_start_time,
-        memory_allocated=torch.cuda.memory_allocated() if device == 'cuda' else 0,
-        memory_reserved=torch.cuda.memory_reserved() if device == 'cuda' else 0,
+        memory_allocated= train_metrics.get("memory_allocated"),
+        memory_reserved=train_metrics.get("memory_reserved"),
         grad_diversity=train_metrics.get("grad_diversity")
     )
     scheduler.step()
@@ -352,11 +364,11 @@ for epoch in range(start_epoch, args.epochs):
         old_batch_size = batch_size
         if args.algorithm == 'divebatch':
             grad_diversity = train_metrics.get("grad_diversity")
-            rescale_ratio = max((grad_diversity / old_grad_diversity),1)
+            # rescale_ratio = max((grad_diversity / old_grad_diversity),1)
+            batch_size = update_batch_size(grad_diversity, args.delta, len(trainset), old_batch_size, args.max_batch_size)
         elif args.algorithm == 'adabatch':
             rescale_ratio = 2
-            breakpoint()
-        batch_size = int(min(old_batch_size * rescale_ratio, args.max_batch_size))
+            batch_size = int(min(old_batch_size * rescale_ratio, args.max_batch_size))
         
         if batch_size != old_batch_size:
             print(f"Recreating trainloader with batch size: {batch_size}...")
@@ -371,7 +383,20 @@ for epoch in range(start_epoch, args.epochs):
         if args.adaptive_lr:
             # rescale the learning rate
             for param_group in optimizer.param_groups:
-                param_group['lr'] *= rescale_ratio
+                param_group['lr'] *= (batch_size / old_batch_size)
                 
     # torch.cuda.empty_cache()
 
+    def update_batch_size(gd, delta, dataset_size, old_batch_size, max_batch_size):
+        if np.isnan(gd) or np.isinf(gd):
+            return max_batch_size
+        if old_batch_size == max_batch_size:
+            return max_batch_size
+        new_batch_size = int(min(max(delta * gd * dataset_size, old_batch_size), max_batch_size))
+        # breakpoint()
+        # new_batch_size = int(min(max(delta * new_gd * dataset_size, old_batch_size), dataset_size))
+
+        # new_batch_size = int(min(max(delta * new_gd * dataset_size**2, old_batch_size, 2048)))
+        # new_batch_size = int(min(max(delta * new_gd * dataset_size**2, old_batch_size), dataset_size))
+        # print(f'New batch size: {new_batch_size}, outcome of min(max({grad_diversity}, {old_batch_size}), {dataset_size}) = {int(min(max(grad_diversity, old_batch_size), dataset_size))}')
+        return new_batch_size
