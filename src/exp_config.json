@@ -14,10 +14,8 @@
                 "batch_size": [256],
                 "max_batch_size": [2048, 4096],
                 "flags": [
-                    [],
-                    ["--adaptive_lr"],
-                    ["--resize_freq", "20"],
-                    ["--resize_freq", "20", "--adaptive_lr"]
+                    ["--resize_freq", "10"],
+                    ["--resize_freq", "10", "--adaptive_lr"]
                 ]
             }
         }
