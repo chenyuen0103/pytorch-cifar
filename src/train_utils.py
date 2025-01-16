@@ -193,8 +193,6 @@ class DiveBatchTrainer(Trainer):
                     # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 # After processing all sub-batches, perform optimizer step
                 self.optimizer.step()
-                peak_memory_allocated = torch.cuda.max_memory_allocated()
-                peak_memory_reserved = torch.cuda.max_memory_reserved()
             else:
                 outputs = self.model(inputs)
                 loss = self.criterion(outputs, targets)
@@ -213,8 +211,6 @@ class DiveBatchTrainer(Trainer):
 
                 self.optimizer.step()
             
-                peak_memory_allocated = torch.cuda.max_memory_allocated()
-                peak_memory_reserved = torch.cuda.max_memory_reserved()
 
                 train_loss += loss.item()
                 _, predicted = outputs.max(1)
@@ -229,7 +225,8 @@ class DiveBatchTrainer(Trainer):
         grad_sum_norm = self.compute_grad_sum_norm(accumulated_grads)
         grad_diversity = self.compute_gradient_diversity(grad_sum_norm, individual_grad_norm_sum)
         self.last_grad_diversity = grad_diversity
-
+        peak_memory_allocated = torch.cuda.max_memory_allocated()
+        peak_memory_reserved = torch.cuda.max_memory_reserved()
 
         return {
             "train_loss": train_loss / len(dataloader),

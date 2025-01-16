@@ -36,8 +36,8 @@ parser.add_argument('--resize_freq', default=10, type=int, help='Resize frequenc
 parser.add_argument('--max_batch_size', default=2048, type=int, help='Maximum batch size for DiveBatch')
 parser.add_argument('--delta', default=0.1, type=float, help='Delta for GradDiversity')
 parser.add_argument('--resume', '-r', action='store_true', help='Resume from checkpoint')
-parser.add_argument('--log_dir', default='../logs', type=str, help='Directory to save logs')
-parser.add_argument('--checkpoint_dir', default='/projects/bdeb/chenyuen0103/checkpoint_multistep', type=str, help='Directory to save checkpoints')
+parser.add_argument('--log_dir', default='../logs_time', type=str, help='Directory to save logs')
+parser.add_argument('--checkpoint_dir', default='/projects/bdeb/chenyuen0103/checkpoint_time', type=str, help='Directory to save checkpoints')
 parser.add_argument('--seed', default=1, type=int, help='Random seed')
 args = parser.parse_args()
 

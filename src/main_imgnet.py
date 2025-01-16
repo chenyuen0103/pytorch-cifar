@@ -189,7 +189,7 @@ def main():
     elif args.algorithm == 'divebatch':
         log_file = os.path.join(log_dir, f'{args.algorithm}_lr{args.lr}_bs{args.batch_size}_rf{args.resize_freq}_mbs{args.max_batch_size}_delta{args.delta}_s{args.seed}.csv')
     elif args.algorithm == 'adabatch':
-        log_file = os.path.join(log_dir, f'{args.algorithm}_lr{args.lr}_bs{args.batch_size}_s{args.seed}.csv')
+        log_file = os.path.join(log_dir, f'{args.algorithm}_lr{args.lr}_bs{args.batch_size}_rf{args.resize_freq}_mbs{args.max_batch_size}_s{args.seed}.csv')
     else:
         raise ValueError(f"Unknown algorithm {args.algorithm}")
 
