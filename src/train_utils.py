@@ -140,9 +140,11 @@ class DiveBatchTrainer(Trainer):
         epoch_start_time = time.time()
         self.model.train()
         train_loss, correct, total = 0, 0, 0
-        accumulated_grads = [torch.zeros_like(param.detach().cpu()) for param in self.model.parameters()]
-        individual_grad_norm_sum = 0
+        
         self.current_batch_size = dataloader.batch_size 
+        if (self.current_batch_size != self.max_batch_size) and (self.resize_freq != 0 and (epoch + 1) % self.resize_freq == 0):
+            accumulated_grads = [torch.zeros_like(param.detach().cpu()) for param in self.model.parameters()]
+            individual_grad_norm_sum = 0
         for batch_idx, (inputs, targets) in enumerate(dataloader):
             inputs, targets = inputs.to(self.device), targets.to(self.device)
             current_batch_size = inputs.size(0)
@@ -188,6 +190,8 @@ class DiveBatchTrainer(Trainer):
                     _, predicted = outputs.max(1)
                     total += sub_targets.size(0)
                     # print(total)
+                    del sub_inputs, sub_targets, outputs
+                    torch.cuda.empty_cache()
                     correct += predicted.eq(sub_targets).sum().item()
                     # Optional: Implement gradient clipping if needed
                     # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
@@ -210,6 +214,8 @@ class DiveBatchTrainer(Trainer):
                     loss.backward()
 
                 self.optimizer.step()
+                # Cleanup after optimizer step
+                torch.cuda.empty_cache()
             
 
                 train_loss += loss.item()
@@ -221,9 +227,9 @@ class DiveBatchTrainer(Trainer):
                 breakpoint()
             progress_bar(batch_idx, len(dataloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
-
-        grad_sum_norm = self.compute_grad_sum_norm(accumulated_grads)
-        grad_diversity = self.compute_gradient_diversity(grad_sum_norm, individual_grad_norm_sum)
+        
+        grad_sum_norm = self.compute_grad_sum_norm(accumulated_grads) if (self.current_batch_size != self.max_batch_size) and (self.resize_freq != 0 and (epoch + 1) % self.resize_freq == 0) else 0
+        grad_diversity = self.compute_gradient_diversity(grad_sum_norm, individual_grad_norm_sum) if (self.current_batch_size != self.max_batch_size) and (self.resize_freq != 0 and (epoch + 1) % self.resize_freq == 0) else 0
         self.last_grad_diversity = grad_diversity
         peak_memory_allocated = torch.cuda.max_memory_allocated()
         peak_memory_reserved = torch.cuda.max_memory_reserved()

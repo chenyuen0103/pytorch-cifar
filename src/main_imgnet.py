@@ -370,12 +370,14 @@ def main():
             if args.algorithm == 'divebatch':
                 grad_diversity = train_metrics.get("grad_diversity")
                 rescale_ratio = max((grad_diversity / old_grad_diversity),1)
+                # batch_size = int(min(old_batch_size * rescale_ratio, args.max_batch_size))
+                batch_size = update_batch_size(grad_diversity, args.delta, len(train_dataset), old_batch_size, args.max_batch_size)
+            
             elif args.algorithm == 'adabatch':
                 rescale_ratio = 2
+                batch_size = int(min(old_batch_size * rescale_ratio, args.max_batch_size))
 
-            # batch_size = int(min(old_batch_size * rescale_ratio, args.max_batch_size))
-            batch_size = update_batch_size(grad_diversity, args.delta, len(train_dataset), old_batch_size, args.max_batch_size)
-            
+
             if batch_size != old_batch_size:
                 print(f"Recreating trainloader with batch size: {batch_size}...")
                 trainloader = torch.utils.data.DataLoader(
