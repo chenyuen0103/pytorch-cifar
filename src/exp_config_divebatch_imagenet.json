@@ -5,16 +5,9 @@
             "divebatch": {
                 "lr": [0.01],
                 "batch_size": [256],
-                "max_batch_size": [2048, 4096],
+                "max_batch_size": [2048],
                 "flags": [
-                    ["--delta", "0.01"],
-                    ["--adaptive_lr", "--delta", "0.01"],
-                    ["--resize_freq", "20", "--delta", "0.01"],
-                    ["--resize_freq", "20", "--adaptive_lr", "--delta", "0.01"],
-                    ["--delta", "0.001"],
-                    ["--adaptive_lr", "--delta", "0.001"],
-                    ["--resize_freq", "20", "--delta", "0.001"],
-                    ["--resize_freq", "20", "--adaptive_lr", "--delta", "0.001"]
+                    ["--delta", "0.01"]
                 ]
             }
         }

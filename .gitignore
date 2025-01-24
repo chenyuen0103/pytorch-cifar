@@ -5,3 +5,4 @@ data/
 *.tar
 src/hyperparam_search_logs/
 logs*/
+plots/

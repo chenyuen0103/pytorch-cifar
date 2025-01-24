@@ -7,8 +7,6 @@
                 "batch_size": [128],
                 "max_batch_size": [2048],
                 "flags": [
-                    ["--delta", "0.1"],
-                    ["--adaptive_lr", "--delta", "0.1"],
                     ["--resize_freq", "20", "--delta", "0.1"],
                     ["--resize_freq", "20", "--adaptive_lr", "--delta", "0.1"]
                 ]
